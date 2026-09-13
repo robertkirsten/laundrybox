@@ -66,51 +66,50 @@ additional detection function with red challenge dots. Keep the function names
 solution-neutral; RFID, scales, and electromagnets belong in the requirements
 or component discussion.
 
-## 3. Requirement sources
-
-| ID | Source |
-|---|---|
-| S-01 | Team decisions recorded on 2026-09-13. |
-| S-02 | Customer interviews and observations of the actual laundry workflow. Interview names and dates must be added before submission where cited. |
-| S-03 | Prototype constraint: five days remaining and a 20 kg load cell already ordered. |
-| S-04 | Team risk assessment: missed damaging objects matter more than unnecessary manual checks. |
-
-## 4. Must-have requirements
+## 3. Must-have requirements
 
 These are additional technical constraints for the requirements slide, rather
 than a repetition of the function sequence.
 
-| ID | Requirement | Source |
-|---|---|---|
-| M-01 | The prototype must evaluate exactly one garment per cycle. | S-01, S-02 |
-| M-02 | The primary identification method must be RFID. If RFID proves technically infeasible during the prototype feasibility test, the team may use a barcode and must document the change. | S-01 |
-| M-03 | The prototype must support recording and retrieving a clean reference weight for each test garment. It may use the same scale for reference and return measurements. | S-01, S-03 |
-| M-04 | The prototype must operate over a garment test range of 50 g to 1,000 g. The selected scale must distinguish the added mass of the lightest test object reliably within this range. | S-01, S-03 |
-| M-05 | The prototype must produce its decision within 10 seconds of a correctly presented garment. Any revision must be documented and justified before final evaluation. | S-01, S-02 |
-| M-06 | The prototype must provide exactly two unambiguous results: PASS and CHECK. Missing identity or reference data, invalid measurements, or other uncertainty must produce CHECK. | S-01, S-04 |
-| M-07 | The agreed evaluation set must include pens as the smallest target class and screwdrivers or heavier metallic objects as representative machine-damage risks. | S-01, S-02 |
-| M-08 | The decision method must target a false-negative rate of no more than 1%, equivalent to sensitivity of at least 99%, on the agreed target-object definition. Prototype results must report observed counts and sample size rather than claim population-level performance from a small test set. | S-01, S-04 |
-| M-09 | Decision thresholds must prioritize sensitivity over specificity. The team must measure and report specificity, but no minimum specificity is fixed until the object prevalence and acceptable manual-check workload are known. | S-01, S-02, S-04 |
-| M-10 | For the prototype, contamination compensation must use either no correction or one documented, configurable fixed offset. The selected method and value must be stored with the results. | S-01, S-03 |
-| M-11 | Each test cycle must retain the garment identifier, reference and return weights, applied offset, decision threshold, result, and timestamp so the decision can be reconstructed. | S-01 |
-| M-12 | Garment-contact surfaces must not snag or damage garments and must be wipe-cleanable. | S-02 |
-| M-13 | The prototype must not store or display wearer identity. | S-01 |
+| ID | Requirement |
+|---|---|
+| M-01 | The prototype must evaluate exactly one garment per cycle. |
+| M-02 | The primary identification method must be RFID. If RFID proves technically infeasible during the prototype feasibility test, the team may use a barcode and must document the change. |
+| M-03 | The prototype must support recording and retrieving a clean reference weight for each test garment. It may use the same scale for reference and return measurements. |
+| M-04 | The prototype must operate over a garment test range of 50 g to 1,000 g. The selected scale must distinguish the added mass of the lightest test object reliably within this range. |
+| M-05 | The prototype must produce its decision within 10 seconds of a correctly presented garment. Any revision must be documented and justified before final evaluation. |
+| M-06 | The prototype must provide exactly two unambiguous results: PASS and CHECK. Missing identity or reference data, invalid measurements, or other uncertainty must produce CHECK. |
+| M-07 | The agreed evaluation set must include pens as the smallest target class and screwdrivers or heavier metallic objects as representative machine-damage risks. |
+| M-08 | The decision method must target a false-negative rate of no more than 1%, equivalent to sensitivity of at least 99%, on the agreed target-object definition. Prototype results must report observed counts and sample size rather than claim population-level performance from a small test set. |
+| M-09 | Decision thresholds must prioritize sensitivity over specificity. The team must measure and report specificity, but no minimum specificity is fixed until the object prevalence and acceptable manual-check workload are known. |
+| M-10 | For the prototype, contamination compensation must use either no correction or one documented, configurable fixed offset. The selected method and value must be stored with the results. |
+| M-11 | Each test cycle must retain the garment identifier, reference and return weights, applied offset, decision threshold, result, and timestamp so the decision can be reconstructed. |
+| M-12 | Garment-contact surfaces must not snag or damage garments and must be wipe-cleanable. |
+| M-13 | The prototype must not store or display wearer identity. |
 
-## 5. Nice-to-have requirements
+## 4. Nice-to-have requirements
 
-| ID | Requirement | Source |
-|---|---|---|
-| N-01 | The prototype should use magnetic or electromagnetic sensing as an additional channel for damaging ferromagnetic objects if the current feasibility test succeeds. | S-01, S-03 |
-| N-02 | If the optional electromagnetic subsystem is fitted, it must de-energize safely after a timeout or control failure and must include suitable electrical, inductive-load, thermal, and magnetic-field protection. | S-04 |
-| N-03 | A normal cycle should require only placing and removing the garment, without manual identifier entry. | S-01, S-02 |
-| N-04 | The operator should be able to record whether a manual check found an object, allowing false positives and false negatives to be evaluated. | S-02, S-04 |
-| N-05 | PASS and CHECK should remain distinguishable without relying on colour alone, for example through text or symbols. | S-04 |
-| N-06 | A future product should learn the expected contamination of each individual garment from its return history instead of relying on one fixed offset. | S-01 |
+| ID | Requirement |
+|---|---|
+| N-01 | The prototype should use magnetic or electromagnetic sensing as an additional channel for damaging ferromagnetic objects if the current feasibility test succeeds. |
+| N-02 | If the optional electromagnetic subsystem is fitted, it must de-energize safely after a timeout or control failure and must include suitable electrical, inductive-load, thermal, and magnetic-field protection. |
+| N-03 | A normal cycle should require only placing and removing the garment, without manual identifier entry. |
+| N-04 | The operator should be able to record whether a manual check found an object, allowing false positives and false negatives to be evaluated. |
+| N-05 | PASS and CHECK should remain distinguishable without relying on colour alone, for example through text or symbols. |
+| N-06 | A future product should learn the expected contamination of each individual garment from its return history instead of relying on one fixed offset. |
+
+## 5. Source policy
+
+Add a source only when a specific requirement comes from verifiable external
+evidence, such as a named customer interview, a dated workflow observation, an
+applicable standard, or a prototype test result. Team choices and available
+components do not need invented citations.
 
 ## 6. Open checks before submission
 
-1. Add the dates or identifiers of the customer interviews and workflow
-   observations used as sources.
+1. Identify which requirements are genuinely supported by the customer
+   interviews or workflow observations, then add the relevant interview or
+   observation details only to those requirements.
 2. Test whether the ordered 20 kg load cell has enough repeatability in the
    50-1,000 g working range, especially for the selected pen.
 3. Fix the exact test objects, number of trials, and placement method before
