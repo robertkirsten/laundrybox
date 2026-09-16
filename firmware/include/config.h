@@ -23,4 +23,11 @@ constexpr uint8_t       kWeightSamples  = 2;    // averaged ADC reads per messag
 constexpr unsigned long kReportPeriodMs = 250;  // JSON emit cadence
 constexpr uint32_t      kAdcReadyMs     = 200;  // max wait for an ADC sample
 
+// Ferrous-metal detector
+constexpr uint8_t kMetalPin            = A0;
+constexpr int     kMetalAdcBits        = 12;    // analogReadResolution -> 0..4095
+constexpr float   kMetalVref           = 3.3f;  // Teensy 4.1 ADC reference (V)
+constexpr float   kMetalThresholdVolts = 0.8f;  // reading above this => metal
+constexpr uint8_t kMetalSamples        = 4;     // averaged analog reads per report
+
 constexpr uint8_t kMaxTagsPerReport = 8;

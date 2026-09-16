@@ -5,10 +5,11 @@
 #include <config.h>
 
 // Message format
-//   {"v":1,"t":12345,"raw":8342133,"weight_g":601.2,
+//   {"v":1,"t":12345,"raw":8342133,"weight_g":601.2,"metal":false,
 //    "tags":[{"epc":"E280..","rssi":210}]}
-//   - raw       : averaged HX711 counts (null if the ADC isn't ready)
+//   - raw       : summed HX711 counts across all cells (null if any ADC isn't ready)
 //   - weight_g  : grams, only if kCalibrationFactor is set, else null
+//   - metal     : true if the ferrous-metal detector (A0) is above threshold
 //   - tags      : every distinct tag seen since the last message ([] if none)
 // + boot line on reset: {"v":1,"event":"boot"}
 
@@ -18,6 +19,10 @@ static_assert(sizeof(kLoadcellSckPins) / sizeof(kLoadcellSckPins[0]) == kNumLoad
               "kLoadcellSckPins must have exactly kNumLoadCells entries");
 static_assert(sizeof(kLoadcellPolarities) / sizeof(kLoadcellPolarities[0]) == kNumLoadCells,
               "kLoadcellPolarities must have exactly kNumLoadCells entries");
+
+// Metal-detector threshold in ADC counts, derived from the volts config.
+constexpr int kMetalThresholdCounts =
+    static_cast<int>(kMetalThresholdVolts / kMetalVref * ((1 << kMetalAdcBits) - 1));
 
 // Runtime state — defined here, in one translation unit. Only constants live in
 // config.h; putting these globals in a header would multiply-define them if a
@@ -78,6 +83,15 @@ void emitReport() {
         HOST_SERIAL.print("null");
     }
 
+    // average a few A0 reads and threshold
+    long metalAcc = 0;
+    for (uint8_t i = 0; i < kMetalSamples; i++) {
+        metalAcc += analogRead(kMetalPin);
+    }
+    const bool metal = (metalAcc / kMetalSamples) > kMetalThresholdCounts;
+    HOST_SERIAL.print(",\"metal\":");
+    HOST_SERIAL.print(metal ? "true" : "false");
+
     HOST_SERIAL.print(",\"tags\":[");
     for (uint8_t i = 0; i < gTagCount; i++) {
         if (i > 0) HOST_SERIAL.print(',');
@@ -97,6 +111,8 @@ void setup() {
 
     reader.begin(RFID_SERIAL, kRfidBaud);
     reader.setTxPower(kRfidTxPower);
+
+    analogReadResolution(kMetalAdcBits);   // ferrous-metal detector on A0
 
     for (uint8_t i = 0; i < kNumLoadCells; i++) {
         gCells[i].begin(kLoadcellDoutPins[i], kLoadcellSckPins[i]);
