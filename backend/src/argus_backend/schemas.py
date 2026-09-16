@@ -71,6 +71,7 @@ class TeensyReport(BaseModel):
     weight_g: float | None
     tags: list[TagObservation] = Field(max_length=64)
     stable: bool | None = None
+    metal: bool | None = None
     load_cells_g: list[float] | None = Field(default=None, max_length=8)
     calibration_version: str | None = Field(default=None, max_length=64)
 
