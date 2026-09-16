@@ -1,5 +1,9 @@
 # Raspberry Pi installation
 
+For normal startup, operation, logs, direct Teensy serial access, and recovery
+after installation, see
+[`../../docs/RASPBERRY_PI_RUNBOOK.md`](../../docs/RASPBERRY_PI_RUNBOOK.md).
+
 These commands assume both repositories are copied to `/opt/argus`, Node.js 22+
 and Python 3.11+ are installed, and the kiosk user is separate from the service
 account.

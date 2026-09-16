@@ -92,3 +92,6 @@ requirements, and evaluation design remain open for the next project phase.
 
 The consolidated product requirements are maintained in
 [REQUIREMENTS.md](REQUIREMENTS.md).
+
+Raspberry Pi startup, operation, serial diagnostics, and troubleshooting are
+documented in [docs/RASPBERRY_PI_RUNBOOK.md](docs/RASPBERRY_PI_RUNBOOK.md).
