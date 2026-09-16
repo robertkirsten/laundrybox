@@ -11,7 +11,7 @@
 //   - weight_g  : grams, only if kCalibrationFactor is set, else null
 //   - metal     : true if the ferrous-metal detector (A0) is above threshold
 //   - tags      : every distinct tag seen since the last message ([] if none)
-// + boot line on reset: {"v":1,"event":"boot"}
+// + boot line on reset: {"v":1,"event":"boot","hx711_sps":10.0}
 
 static_assert(sizeof(kLoadcellDoutPins) / sizeof(kLoadcellDoutPins[0]) == kNumLoadCells,
               "kLoadcellDoutPins must have exactly kNumLoadCells entries");
@@ -37,7 +37,7 @@ struct TagObs {
 };
 TagObs        gTags[kMaxTagsPerReport];
 uint8_t       gTagCount = 0;
-unsigned long gLastReportMs = 0;
+
 
 void recordTag(const UHF_RFID::Tag &tag) {
     char epc[UHF_RFID::kMaxEpc * 2 + 1] = {0};
@@ -126,19 +126,49 @@ void setup() {
         }
     }
 
-    HOST_SERIAL.println(R"({"v":1,"event":"boot"})");
+    // Measure actual HX711 sample rate so the operator can verify 10/80 SPS.
+    float measuredSps = 0.0f;
+    if (gCells[0].wait_ready_timeout(1000)) {
+        gCells[0].read();                        // trigger next conversion
+        const unsigned long t0 = micros();
+        gCells[0].wait_ready_timeout(1000);       // wait for it to finish
+        const unsigned long dt = micros() - t0;
+        if (dt > 0) measuredSps = 1000000.0f / dt;
+    }
+
+    HOST_SERIAL.print(R"({"v":1,"event":"boot","hx711_sps":)");
+    HOST_SERIAL.print(measuredSps, 1);
+    HOST_SERIAL.println("}");
 }
 
 void loop() {
-    UHF_RFID::Tag tag;
-    if (reader.pollOnce(tag)) {
-        recordTag(tag);
+    const unsigned long cycleStart = millis();
+
+    // ── Phase 1: RFID scan window (RF active) ──
+    const unsigned long rfidStart = millis();
+    while (millis() - rfidStart < kRfidWindowMs) {
+        UHF_RFID::Tag tag;
+        if (reader.pollOnce(tag, kRfidPollTimeoutMs)) {
+            recordTag(tag);
+        }
     }
 
-    const unsigned long now = millis();
-    if (now - gLastReportMs >= kReportPeriodMs) {
-        gLastReportMs = now;
-        emitReport();
-        gTagCount = 0;
+    // ── Phase 2: Settle (RF off, discard contaminated HX711 conversions) ──
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+        for (uint8_t s = 0; s < kSettleConversions; s++) {
+            if (gCells[i].wait_ready_timeout(kAdcReadyMs)) {
+                gCells[i].read();   // discard
+            }
+        }
+    }
+
+    // ── Phase 3: Measure and emit (RF off, clean reads) ──
+    emitReport();
+    gTagCount = 0;
+
+    // ── Pace: enforce minimum cycle time ──
+    const unsigned long elapsed = millis() - cycleStart;
+    if (elapsed < kMinCyclePeriodMs) {
+        delay(kMinCyclePeriodMs - elapsed);
     }
 }

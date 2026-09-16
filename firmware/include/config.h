@@ -7,6 +7,8 @@
 constexpr unsigned long kHostBaud    = 115200;
 constexpr unsigned long kRfidBaud    = 115200;
 constexpr uint16_t      kRfidTxPower = 2600;   // dBm * 100 = 26.00 dBm
+constexpr unsigned long kRfidWindowMs      = 100;  // ms spent polling RFID before weighing
+constexpr uint32_t      kRfidPollTimeoutMs = 50;   // single pollOnce() timeout
 
 constexpr uint8_t kNumLoadCells        = 1;
 constexpr uint8_t kLoadcellDoutPins[]  = {2};//, 4};
@@ -19,9 +21,10 @@ constexpr float kLoadcellPolarities[]  = {1.0f};//, -1.0f};
 constexpr float   kCalibrationFactor = 107.026405f;
 constexpr uint8_t kTareSamples       = 20;
 
-constexpr uint8_t       kWeightSamples  = 2;    // averaged ADC reads per message
-constexpr unsigned long kReportPeriodMs = 250;  // JSON emit cadence
-constexpr uint32_t      kAdcReadyMs     = 200;  // max wait for an ADC sample
+constexpr uint8_t       kWeightSamples      = 2;    // averaged ADC reads per measurement
+constexpr uint8_t       kSettleConversions  = 2;    // HX711 reads to discard after RFID stops
+constexpr unsigned long kMinCyclePeriodMs   = 250;  // minimum cycle time (floor, not fixed cadence)
+constexpr uint32_t      kAdcReadyMs         = 200;  // max wait for an ADC sample
 
 // Ferrous-metal detector
 constexpr uint8_t kMetalPin            = A0;
