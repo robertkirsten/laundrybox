@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <math.h>
+#include <stdlib.h>
 
 #include "HX711.h"
 
@@ -8,18 +9,9 @@ namespace {
 constexpr uint8_t LOADCELL_DOUT_PIN = 2;
 constexpr uint8_t LOADCELL_SCK_PIN = 3;
 
-// The plate and box remain installed throughout calibration. Place this known
-// mass inside the empty box when prompted, then remove it when prompted.
-constexpr float CALIBRATION_MASS_G = 557.4f;
-
-// Temporary prototype target: one Argus. Replace after weighing the garment.
-constexpr float CLEAN_GARMENT_WEIGHT_G = 601.4f; //557.4f;
-constexpr float WEIGHT_THRESHOLD_G = 3.0f;
-
 constexpr uint8_t TARE_SAMPLES = 20;
 constexpr uint8_t CALIBRATION_SAMPLES = 20;
-constexpr uint8_t MEASUREMENT_SAMPLES = 10;
-constexpr unsigned long PLACEMENT_TIME_MS = 5000;
+constexpr float MIN_REFERENCE_SIGNAL_COUNTS = 100.0f;
 
 HX711 scale;
 
@@ -32,57 +24,120 @@ void haltWithError(const char *message) {
   }
 }
 
-void calibrateWithInstalledAssembly() {
-  scale.set_scale(1.0f);
+String readSerialLine() {
+  String line;
 
-  Serial.println("Calibration step 1/3");
-  Serial.println("Leave the plate and empty box installed.");
-  Serial.println("Remove all garments and calibration objects.");
-  Serial.println("Taring the empty assembly in 5 seconds...");
-  delay(PLACEMENT_TIME_MS);
-  scale.tare(TARE_SAMPLES);
+  while (true) {
+    while (Serial.available() > 0) {
+      const char character = static_cast<char>(Serial.read());
 
-  Serial.println("Calibration step 2/3");
-  Serial.print("Place the calibration mass in the box (mass: ");
-  Serial.print(CALIBRATION_MASS_G, 1);
-  Serial.println(" g). Keep it still and ensure it touches only the box.");
-  Serial.println("Measuring the reference mass in 5 seconds...");
-  delay(PLACEMENT_TIME_MS);
+      if (character == '\r' || character == '\n') {
+        // A serial monitor commonly sends CR+LF. Consume the second line-ending
+        // character so it cannot accidentally acknowledge the next prompt.
+        delay(2);
+        while (Serial.available() > 0) {
+          const int nextCharacter = Serial.peek();
+          if (nextCharacter != '\r' && nextCharacter != '\n') {
+            break;
+          }
+          Serial.read();
+        }
+        return line;
+      }
 
-  const float rawReferenceCounts = scale.get_value(CALIBRATION_SAMPLES);
-  if (!isfinite(rawReferenceCounts) || fabsf(rawReferenceCounts) < 100.0f) {
-    haltWithError(
-        "Reference signal is too small. Check mounting and calibration sequence.");
+      line += character;
+    }
+
+    delay(1);
   }
-
-  const float calibrationFactor =
-      rawReferenceCounts / CALIBRATION_MASS_G;
-  scale.set_scale(calibrationFactor);
-
-  Serial.print("Calibration factor: ");
-  Serial.print(calibrationFactor, 6);
-  Serial.println(" raw counts/g");
-
-  Serial.println("Calibration step 3/3");
-  Serial.println("Remove the calibration mass. Leave the plate and box installed.");
-  Serial.println("Taring the empty assembly again in 5 seconds...");
-  delay(PLACEMENT_TIME_MS);
-  scale.tare(TARE_SAMPLES);
-  Serial.println("Ready. Add a garment for PASS/CHECK testing.");
 }
 
-void printMeasurement(float weightG) {
-  const float differenceG = fabsf(weightG - CLEAN_GARMENT_WEIGHT_G);
-  const bool passes = differenceG <= WEIGHT_THRESHOLD_G;
+void waitForEnter() {
+  readSerialLine();
+}
 
-  Serial.print("Weight: ");
-  Serial.print(weightG, 1);
-  Serial.print(" g | Target: ");
-  Serial.print(CLEAN_GARMENT_WEIGHT_G, 1);
-  Serial.print(" g | Difference: ");
-  Serial.print(differenceG, 1);
-  Serial.print(" g | ");
-  Serial.println(passes ? "PASS" : "CHECK");
+float readCalibrationMassG() {
+  while (true) {
+    Serial.println();
+    Serial.println("Enter the calibration object's mass in grams, then press Enter:");
+
+    String input = readSerialLine();
+    input.trim();
+
+    char *end = nullptr;
+    const float massG = strtof(input.c_str(), &end);
+    const bool parsedEntireInput =
+        end != input.c_str() && end != nullptr && *end == '\0';
+
+    if (parsedEntireInput && isfinite(massG) && massG > 0.0f) {
+      Serial.print("Calibration mass: ");
+      Serial.print(massG, 3);
+      Serial.println(" g");
+      return massG;
+    }
+
+    Serial.println("Invalid mass. Enter a positive number, for example: 557.4");
+  }
+}
+
+void runCalibration(float calibrationMassG) {
+  // A scale factor of 1 makes get_value() return tared raw ADC counts.
+  scale.set_scale(1.0f);
+
+  Serial.println();
+  Serial.println("Step 1/2: Prepare the empty scale");
+  Serial.println("Leave the plate/box installed and remove every loose object.");
+  Serial.println("Press Enter when the scale is empty and stable.");
+  waitForEnter();
+
+  if (!scale.wait_ready_timeout(3000)) {
+    Serial.println("ERROR: HX711 not ready. Calibration cancelled.");
+    return;
+  }
+
+  Serial.println("Taring...");
+  scale.tare(TARE_SAMPLES);
+
+  Serial.println();
+  Serial.println("Step 2/2: Measure the reference object");
+  Serial.print("Place the ");
+  Serial.print(calibrationMassG, 3);
+  Serial.println(" g object on the scale and keep it still.");
+  Serial.println("Press Enter when the reading is stable.");
+  waitForEnter();
+
+  if (!scale.wait_ready_timeout(3000)) {
+    Serial.println("ERROR: HX711 not ready. Calibration cancelled.");
+    return;
+  }
+
+  Serial.println("Sampling...");
+  const float rawReferenceCounts = scale.get_value(CALIBRATION_SAMPLES);
+
+  if (!isfinite(rawReferenceCounts) ||
+      fabsf(rawReferenceCounts) < MIN_REFERENCE_SIGNAL_COUNTS) {
+    Serial.println(
+        "ERROR: Reference signal is too small. Check the wiring, mounting, and sequence.");
+    return;
+  }
+
+  const float calibrationFactor = rawReferenceCounts / calibrationMassG;
+
+  Serial.println();
+  Serial.println("Calibration complete");
+  Serial.print("Tared raw reading: ");
+  Serial.println(rawReferenceCounts, 3);
+  Serial.print("Calibration factor: ");
+  Serial.print(calibrationFactor, 6);
+  Serial.println(" raw counts/gram");
+  Serial.println();
+  Serial.println("Use this value with the HX711 library:");
+  Serial.print("scale.set_scale(");
+  Serial.print(calibrationFactor, 6);
+  Serial.println("f);");
+  Serial.println("After calling scale.tare(), scale.get_units() will return grams.");
+  Serial.println();
+  Serial.println("Remove the object. A new calibration can now be started.");
 }
 
 }  // namespace
@@ -95,31 +150,18 @@ void setup() {
     // Give the USB serial monitor a short opportunity to connect.
   }
 
-  if (CALIBRATION_MASS_G <= 0.0f) {
-    haltWithError("CALIBRATION_MASS_G must be positive.");
-  }
-  if (CLEAN_GARMENT_WEIGHT_G <= 0.0f) {
-    haltWithError("Set CLEAN_GARMENT_WEIGHT_G in main.cpp.");
-  }
-  if (WEIGHT_THRESHOLD_G < 0.0f) {
-    haltWithError("WEIGHT_THRESHOLD_G cannot be negative.");
-  }
+  Serial.println();
+  Serial.println("HX711 calibration firmware");
+  Serial.println("Serial speed: 57600 baud");
+  Serial.println("Configure the serial monitor to send a line ending.");
 
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
   if (!scale.wait_ready_timeout(3000)) {
     haltWithError("HX711 not found. Check power and wiring.");
   }
-
-  calibrateWithInstalledAssembly();
 }
 
 void loop() {
-  if (!scale.wait_ready_timeout(1000)) {
-    Serial.println("ERROR: HX711 not ready.");
-    delay(1000);
-    return;
-  }
-
-  printMeasurement(scale.get_units(MEASUREMENT_SAMPLES));
-  delay(1000);
+  const float calibrationMassG = readCalibrationMassG();
+  runCalibration(calibrationMassG);
 }
