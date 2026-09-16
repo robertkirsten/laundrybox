@@ -1,0 +1,26 @@
+[Unit]
+Description=ARGUS LaundryBox backend
+After=local-fs.target
+
+[Service]
+Type=simple
+User=argus
+Group=argus
+SupplementaryGroups=dialout
+WorkingDirectory=/opt/argus/laundrybox/backend
+EnvironmentFile=/etc/argus/backend.env
+ExecStartPre=/opt/argus/venv/bin/alembic -c /opt/argus/laundrybox/backend/alembic.ini upgrade head
+ExecStart=/opt/argus/venv/bin/argus-backend serve --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=2
+StateDirectory=argus
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/argus
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

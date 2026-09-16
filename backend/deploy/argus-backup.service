@@ -1,0 +1,18 @@
+[Unit]
+Description=Back up the ARGUS SQLite database
+After=argus-backend.service
+
+[Service]
+Type=oneshot
+User=argus
+Group=argus
+WorkingDirectory=/opt/argus/laundrybox/backend
+EnvironmentFile=/etc/argus/backend.env
+ExecStart=/opt/argus/venv/bin/argus-backend backup /var/lib/argus/backups --keep 14
+StateDirectory=argus
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/argus
