@@ -12,10 +12,17 @@
 //   - tags      : every distinct tag seen since the last message ([] if none)
 // + boot line on reset: {"v":1,"event":"boot"}
 
+// The pin arrays in config.h must line up with the declared cell count
+static_assert(sizeof(kLoadcellDoutPins) / sizeof(kLoadcellDoutPins[0]) == kNumLoadCells,
+              "kLoadcellDoutPins must have exactly kNumLoadCells entries");
+static_assert(sizeof(kLoadcellSckPins) / sizeof(kLoadcellSckPins[0]) == kNumLoadCells,
+              "kLoadcellSckPins must have exactly kNumLoadCells entries");
+
 // Runtime state — defined here, in one translation unit. Only constants live in
 // config.h; putting these globals in a header would multiply-define them if a
 // second .cpp ever included it.
-HX711    scale;
+
+HX711    gCells[kNumLoadCells];
 UHF_RFID reader;
 
 struct TagObs {
@@ -44,19 +51,28 @@ void recordTag(const UHF_RFID::Tag &tag) {
 }
 
 void emitReport() {
-    const bool ready = scale.wait_ready_timeout(kAdcReadyMs);
-    const long raw   = ready ? scale.read_average(kWeightSamples) : 0;
+    long rawSum    = 0;
+    long offsetSum = 0;
+    bool ready     = true;
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+        if (!gCells[i].wait_ready_timeout(kAdcReadyMs)) {
+            ready = false;
+            break;
+        }
+        rawSum    += gCells[i].read_average(kWeightSamples);
+        offsetSum += gCells[i].get_offset();
+    }
 
     HOST_SERIAL.print("{\"v\":1,\"t\":");
     HOST_SERIAL.print(millis());
 
     HOST_SERIAL.print(",\"raw\":");
-    if (ready) HOST_SERIAL.print(raw);
+    if (ready) HOST_SERIAL.print(rawSum);
     else       HOST_SERIAL.print("null");
 
     HOST_SERIAL.print(",\"weight_g\":");
     if (ready && kCalibrationFactor > 0.0f) {
-        HOST_SERIAL.print((raw - scale.get_offset()) / scale.get_scale(), 1);
+        HOST_SERIAL.print((rawSum - offsetSum) / kCalibrationFactor, 1);
     } else {
         HOST_SERIAL.print("null");
     }
@@ -81,10 +97,16 @@ void setup() {
     reader.begin(RFID_SERIAL, kRfidBaud);
     reader.setTxPower(kRfidTxPower);
 
-    scale.begin(kLoadcellDoutPin, kLoadcellSckPin);
-    if (kCalibrationFactor > 0.0f && scale.wait_ready_timeout(1000)) {
-        scale.set_scale(kCalibrationFactor);
-        scale.tare(kTareSamples);
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+        gCells[i].begin(kLoadcellDoutPins[i], kLoadcellSckPins[i]);
+    }
+
+    if (kCalibrationFactor > 0.0f) {
+        for (uint8_t i = 0; i < kNumLoadCells; i++) {
+            if (gCells[i].wait_ready_timeout(1000)) {
+                gCells[i].tare(kTareSamples);
+            }
+        }
     }
 
     HOST_SERIAL.println(R"({"v":1,"event":"boot"})");

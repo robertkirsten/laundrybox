@@ -8,8 +8,9 @@ constexpr unsigned long kHostBaud    = 115200;
 constexpr unsigned long kRfidBaud    = 115200;
 constexpr uint16_t      kRfidTxPower = 2600;   // dBm * 100 = 26.00 dBm
 
-constexpr uint8_t kLoadcellDoutPin = 2;
-constexpr uint8_t kLoadcellSckPin  = 3;
+constexpr uint8_t kNumLoadCells        = 2;
+constexpr uint8_t kLoadcellDoutPins[]  = {2, 4};
+constexpr uint8_t kLoadcellSckPins[]   = {3, 5};
 
 constexpr float   kCalibrationFactor = 0.0f;
 constexpr uint8_t kTareSamples       = 20;
