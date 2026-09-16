@@ -28,6 +28,10 @@ argus-backend replay scripts/example-cycle.jsonl --hold 5
 The debug ingest endpoint is disabled by default and the server binds to
 loopback by default.
 
+Mock garment/reference data is loaded from the packaged, Pydantic-validated
+`src/argus_backend/fixtures/mock_garments.csv`. Set `ARGUS_MOCK_DATA_PATH` to
+an absolute CSV path to supply a deployment-specific fixture file.
+
 ## Raspberry Pi
 
 Production units, the udev rule, environment file, verified daily backup, and

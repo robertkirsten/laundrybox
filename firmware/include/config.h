@@ -12,7 +12,11 @@ constexpr uint8_t kNumLoadCells        = 2;
 constexpr uint8_t kLoadcellDoutPins[]  = {2, 4};
 constexpr uint8_t kLoadcellSckPins[]   = {3, 5};
 
-constexpr float   kCalibrationFactor = 0.0f;
+// TEMPORARY FIX: Cell 1 is mounted upside down, which causes its reading to be negative.
+// We multiply its reading by -1 to flip it. Change this back to {1, 1} once it's remounted correctly!
+constexpr float kLoadcellPolarities[]  = {1.0f, -1.0f};
+
+constexpr float   kCalibrationFactor = 107.44f;
 constexpr uint8_t kTareSamples       = 20;
 
 constexpr uint8_t       kWeightSamples  = 2;    // averaged ADC reads per message

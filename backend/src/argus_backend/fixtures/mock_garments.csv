@@ -1,0 +1,4 @@
+epc,chute_number,id_number,article_number,product_name,size,manufacture_year,manufacture_week,customer_number,customer_name,wearer_number,wearer_name,reference_weight_g,source,calibration_version
+E28011052000773410000001,911,77341,A-5521,Hose Blau,L,2020,8,K-20441,Müller & Co.,T-8821,Sabine Weber,240.0,mock_seed,mock-1
+E28011052000773420000002,912,77342,A-7810,Jacke Grau,M,2021,17,K-20441,Müller & Co.,T-8821,Sabine Weber,620.0,mock_seed,mock-1
+E28011052000773430000003,913,77343,A-3142,Hemd Weiß,XL,2022,4,K-20441,Müller & Co.,T-8821,Sabine Weber,180.0,mock_seed,mock-1

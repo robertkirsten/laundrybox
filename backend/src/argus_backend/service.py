@@ -7,7 +7,7 @@ from pydantic import TypeAdapter
 
 from .config import Settings
 from .events import SnapshotBroker
-from .repository import Repository
+from .repository import CycleNotFound, FeedbackConflict, Repository
 from .schemas import (
     DisplaySnapshot,
     InspectionRequest,
@@ -66,12 +66,16 @@ class StationService:
 
     async def handle_message(self, message: TeensyMessage) -> None:
         async with self._lock:
-            if isinstance(message, TeensyReport):
-                snapshot = self.machine.on_report(message)
-            elif isinstance(message, TeensyEvent):
-                snapshot = self.machine.on_event(message)
-            else:  # pragma: no cover - the TypeAdapter makes this unreachable
-                raise TypeError(f"unsupported Teensy message: {type(message)!r}")
+            try:
+                if isinstance(message, TeensyReport):
+                    snapshot = self.machine.on_report(message)
+                elif isinstance(message, TeensyEvent):
+                    snapshot = self.machine.on_event(message)
+                else:  # pragma: no cover - the TypeAdapter makes this unreachable
+                    raise TypeError(f"unsupported Teensy message: {type(message)!r}")
+            except Exception:
+                logger.exception("message processing failed; station forced unavailable")
+                snapshot = self.machine.on_database_error()
             if snapshot is not None:
                 await self.broker.publish(snapshot)
 
@@ -87,8 +91,15 @@ class StationService:
 
     async def add_feedback(self, cycle_id: str, request: InspectionRequest) -> InspectionResponse:
         async with self._lock:
-            response = self.repository.add_feedback(cycle_id, request)
-            await self.broker.mark_feedback_recorded(cycle_id)
+            try:
+                response = self.repository.add_feedback(cycle_id, request)
+            except (CycleNotFound, FeedbackConflict):
+                raise
+            except Exception:
+                logger.exception("feedback write failed; station forced unavailable")
+                await self.broker.publish(self.machine.on_database_error())
+                raise
+            await self.broker.mark_feedback_recorded(cycle_id, response.category)
             return response
 
     async def _monitor(self) -> None:
@@ -96,11 +107,12 @@ class StationService:
             while True:
                 await asyncio.sleep(self.settings.monitor_interval_s)
                 async with self._lock:
-                    snapshot = self.machine.tick()
+                    try:
+                        snapshot = self.machine.tick()
+                    except Exception:
+                        logger.exception("cycle monitor failed; station forced unavailable")
+                        snapshot = self.machine.on_database_error()
                     if snapshot is not None:
                         await self.broker.publish(snapshot)
         except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("cycle monitor crashed")
             raise

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from .schemas import DisplaySnapshot
+from .schemas import DisplaySnapshot, InspectionCategory
 
 
 class SnapshotBroker:
@@ -21,7 +21,9 @@ class SnapshotBroker:
             self._condition.notify_all()
             return self._snapshot
 
-    async def mark_feedback_recorded(self, cycle_id: str) -> DisplaySnapshot | None:
+    async def mark_feedback_recorded(
+        self, cycle_id: str, category: InspectionCategory
+    ) -> DisplaySnapshot | None:
         async with self._condition:
             if self._snapshot.cycle_id != cycle_id:
                 return None
@@ -29,6 +31,7 @@ class SnapshotBroker:
                 update={
                     "revision": self._snapshot.revision + 1,
                     "feedback_recorded": True,
+                    "feedback_category": category,
                 }
             )
             self._condition.notify_all()

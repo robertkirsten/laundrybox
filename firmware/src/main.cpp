@@ -12,11 +12,12 @@
 //   - tags      : every distinct tag seen since the last message ([] if none)
 // + boot line on reset: {"v":1,"event":"boot"}
 
-// The pin arrays in config.h must line up with the declared cell count
 static_assert(sizeof(kLoadcellDoutPins) / sizeof(kLoadcellDoutPins[0]) == kNumLoadCells,
               "kLoadcellDoutPins must have exactly kNumLoadCells entries");
 static_assert(sizeof(kLoadcellSckPins) / sizeof(kLoadcellSckPins[0]) == kNumLoadCells,
               "kLoadcellSckPins must have exactly kNumLoadCells entries");
+static_assert(sizeof(kLoadcellPolarities) / sizeof(kLoadcellPolarities[0]) == kNumLoadCells,
+              "kLoadcellPolarities must have exactly kNumLoadCells entries");
 
 // Runtime state — defined here, in one translation unit. Only constants live in
 // config.h; putting these globals in a header would multiply-define them if a
@@ -59,8 +60,8 @@ void emitReport() {
             ready = false;
             break;
         }
-        rawSum    += gCells[i].read_average(kWeightSamples);
-        offsetSum += gCells[i].get_offset();
+        rawSum    += gCells[i].read_average(kWeightSamples) * kLoadcellPolarities[i];
+        offsetSum += gCells[i].get_offset() * kLoadcellPolarities[i];
     }
 
     HOST_SERIAL.print("{\"v\":1,\"t\":");

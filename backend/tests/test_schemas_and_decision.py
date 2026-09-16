@@ -69,6 +69,20 @@ def test_teensy_schema_normalizes_epc_and_forbids_unknown_fields() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"serial_baud": 0},
+        {"removal_confirm_samples": 1},
+        {"empty_weight_max_g": 50.0, "min_garment_weight_g": 50.0},
+        {"min_garment_weight_g": 1000.0, "max_garment_weight_g": 1000.0},
+    ],
+)
+def test_invalid_runtime_configuration_is_rejected(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **overrides)
+
+
 @pytest.mark.parametrize("weight_g", [237.0, 243.0])
 def test_threshold_is_inclusive_at_three_grams(weight_g: float) -> None:
     result = evaluate_cycle(

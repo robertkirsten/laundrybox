@@ -33,6 +33,35 @@ class TagObservation(BaseModel):
         return value
 
 
+class GarmentSeed(BaseModel):
+    """Validated row from the operator-editable mock garment CSV."""
+
+    model_config = StrictModelConfig
+
+    epc: Epc
+    chute_number: int = Field(gt=0)
+    id_number: str = Field(min_length=1, max_length=64)
+    article_number: str = Field(min_length=1, max_length=64)
+    product_name: str = Field(min_length=1, max_length=160)
+    size: str = Field(min_length=1, max_length=32)
+    manufacture_year: int = Field(ge=1900, le=2200)
+    manufacture_week: int = Field(ge=1, le=53)
+    customer_number: str = Field(min_length=1, max_length=64)
+    customer_name: str = Field(min_length=1, max_length=160)
+    wearer_number: str = Field(min_length=1, max_length=64)
+    wearer_name: str = Field(min_length=1, max_length=160)
+    reference_weight_g: float = Field(gt=0)
+    source: str = Field(min_length=1, max_length=64)
+    calibration_version: str | None = Field(default=None, max_length=64)
+
+    @field_validator("epc")
+    @classmethod
+    def validate_epc(cls, value: str) -> str:
+        if len(value) % 2 or any(character not in "0123456789ABCDEF" for character in value):
+            raise ValueError("EPC must contain an even number of hexadecimal characters")
+        return value
+
+
 class TeensyReport(BaseModel):
     model_config = StrictModelConfig
 
@@ -145,6 +174,19 @@ class MeasurementSnapshot(BaseModel):
     stable: bool
 
 
+class InspectionCategory(StrEnum):
+    NOTHING_FOUND = "nothing_found"
+    SCISSORS = "scissors"
+    KEYS = "keys"
+    MONEY = "money"
+    PAPER = "paper"
+    PEN = "pen"
+    TISSUES = "tissues"
+    HEADPHONES = "headphones"
+    TOOL = "tool"
+    OTHER = "other"
+
+
 class DisplaySnapshot(BaseModel):
     model_config = StrictModelConfig
 
@@ -161,19 +203,7 @@ class DisplaySnapshot(BaseModel):
     measurement: MeasurementSnapshot | None = None
     health: HealthSnapshot
     feedback_recorded: bool = False
-
-
-class InspectionCategory(StrEnum):
-    NOTHING_FOUND = "nothing_found"
-    SCISSORS = "scissors"
-    KEYS = "keys"
-    MONEY = "money"
-    PAPER = "paper"
-    PEN = "pen"
-    TISSUES = "tissues"
-    HEADPHONES = "headphones"
-    TOOL = "tool"
-    OTHER = "other"
+    feedback_category: InspectionCategory | None = None
 
 
 class InspectionRequest(BaseModel):

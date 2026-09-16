@@ -52,7 +52,9 @@ def test_debug_cycle_api_and_idempotent_feedback(settings: Settings) -> None:
         )
         assert feedback.status_code == 201
         assert not feedback.json()["duplicate"]
-        assert client.get("/api/v1/state").json()["feedback_recorded"]
+        feedback_state = client.get("/api/v1/state").json()
+        assert feedback_state["feedback_recorded"]
+        assert feedback_state["feedback_category"] == "nothing_found"
 
         duplicate = client.post(
             f"/api/v1/cycles/{cycle_id}/inspection",

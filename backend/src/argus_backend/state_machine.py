@@ -14,7 +14,6 @@ from .repository import (
     CycleWrite,
     GarmentLookup,
     Repository,
-    RepositoryError,
     RuntimeContext,
     TagStat,
     utc_now,
@@ -24,6 +23,7 @@ from .schemas import (
     DecisionReason,
     DisplaySnapshot,
     HealthSnapshot,
+    InspectionCategory,
     Lifecycle,
     MeasurementSnapshot,
     TeensyEvent,
@@ -71,13 +71,15 @@ class CycleStateMachine:
         self.settings = settings
         self.repository = repository
         self.context: RuntimeContext = repository.runtime_context()
+        self.scanned_count = repository.completed_known_cycle_count()
         self.serial_connected = False
         self.last_report_monotonic: float | None = None
+        self.rfid_fault_latched = False
         self.rfid_ok = False
         self.scale_ok = False
         self.database_ok = True
         self.needs_empty = True
-        self.empty_samples = 0
+        self.empty_weights: deque[float] = deque(maxlen=settings.removal_confirm_samples)
         self.active_cycle: ActiveCycle | None = None
         self.result: DecisionResult | None = None
         self.result_garment: GarmentLookup | None = None
@@ -113,10 +115,12 @@ class CycleStateMachine:
         self.lifecycle = Lifecycle.UNAVAILABLE
         if event.event == "boot":
             self.reason = DecisionReason.TEENSY_RESTARTED
+            self.rfid_fault_latched = False
             self.rfid_ok = False
             self.scale_ok = False
         else:
             self.reason = DecisionReason.RFID_CONFIGURATION_ERROR
+            self.rfid_fault_latched = True
             self.rfid_ok = False
         return self._snapshot()
 
@@ -131,7 +135,6 @@ class CycleStateMachine:
         now_monotonic = now_monotonic if now_monotonic is not None else time.monotonic()
         self.serial_connected = True
         self.last_report_monotonic = now_monotonic
-        self.rfid_ok = True
 
         if report.weight_g is None or not isfinite(report.weight_g):
             self.scale_ok = False
@@ -141,37 +144,45 @@ class CycleStateMachine:
             return self._snapshot()
 
         self.scale_ok = True
+        if self.rfid_fault_latched:
+            self.rfid_ok = False
+            self._reset_cycle(require_empty=True)
+            self.lifecycle = Lifecycle.UNAVAILABLE
+            self.reason = DecisionReason.RFID_CONFIGURATION_ERROR
+            return self._snapshot()
+        self.rfid_ok = True
+        if not self.database_ok:
+            self._reset_cycle(require_empty=True)
+            self.lifecycle = Lifecycle.UNAVAILABLE
+            self.reason = DecisionReason.DATABASE_ERROR
+            return self._snapshot()
+
         weight_g = report.weight_g
 
         if self.needs_empty:
-            if weight_g <= self.settings.empty_weight_max_g:
-                self.empty_samples += 1
-                if self.empty_samples >= self.settings.removal_confirm_samples:
-                    self.needs_empty = False
-                    self.empty_samples = 0
-                    self.lifecycle = Lifecycle.WAITING
-                    self.reason = DecisionReason.WAITING_FOR_GARMENT
-                    return self._snapshot()
+            if self._observe_empty(weight_g, report.stable):
+                self.needs_empty = False
+                self.empty_weights.clear()
+                self.lifecycle = Lifecycle.WAITING
+                self.reason = DecisionReason.WAITING_FOR_GARMENT
+                return self._snapshot()
+            if abs(weight_g) <= self.settings.empty_weight_max_g:
                 return None
-            self.empty_samples = 0
             self.lifecycle = Lifecycle.UNAVAILABLE
             self.reason = DecisionReason.REMOVE_GARMENT_AFTER_RESTART
             return self._snapshot()
 
         if self.result is not None:
-            if weight_g <= self.settings.empty_weight_max_g:
-                self.empty_samples += 1
-                if self.empty_samples >= self.settings.removal_confirm_samples:
-                    self._reset_cycle(require_empty=False)
-                    self.lifecycle = Lifecycle.WAITING
-                    self.reason = DecisionReason.WAITING_FOR_GARMENT
-                    return self._snapshot()
-            else:
-                self.empty_samples = 0
+            if self._observe_empty(weight_g, report.stable):
+                self._reset_cycle(require_empty=False)
+                self.lifecycle = Lifecycle.WAITING
+                self.reason = DecisionReason.WAITING_FOR_GARMENT
+                return self._snapshot()
             return None
 
         if self.active_cycle is None:
-            if weight_g <= self.settings.empty_weight_max_g:
+            if abs(weight_g) <= self.settings.empty_weight_max_g:
+                self.empty_weights.clear()
                 if self.lifecycle is not Lifecycle.WAITING:
                     self.lifecycle = Lifecycle.WAITING
                     self.reason = DecisionReason.WAITING_FOR_GARMENT
@@ -223,10 +234,34 @@ class CycleStateMachine:
             return self._finalize(measured_weight_g, stable=stable, completed_at=utc_now())
         return None
 
-    def mark_feedback_recorded(self, cycle_id: str) -> DisplaySnapshot | None:
+    def mark_feedback_recorded(
+        self, cycle_id: str, category: InspectionCategory
+    ) -> DisplaySnapshot | None:
         if self.active_cycle is None or self.active_cycle.cycle_id != cycle_id:
             return None
-        return self._snapshot(feedback_recorded=True)
+        return self._snapshot(feedback_recorded=True, feedback_category=category)
+
+    def on_database_error(self) -> DisplaySnapshot:
+        self.database_ok = False
+        self._reset_cycle(require_empty=True)
+        self.lifecycle = Lifecycle.UNAVAILABLE
+        self.reason = DecisionReason.DATABASE_ERROR
+        return self._snapshot()
+
+    def _observe_empty(self, weight_g: float, firmware_stable: bool | None) -> bool:
+        if abs(weight_g) > self.settings.empty_weight_max_g:
+            self.empty_weights.clear()
+            return False
+        self.empty_weights.append(weight_g)
+        if len(self.empty_weights) < self.settings.removal_confirm_samples:
+            return False
+        if firmware_stable is False:
+            return False
+        if firmware_stable is True:
+            return True
+        return (
+            max(self.empty_weights) - min(self.empty_weights) <= self.settings.stability_tolerance_g
+        )
 
     def _collect(self, report: TeensyReport, observed_at: datetime) -> None:
         cycle = self.active_cycle
@@ -278,46 +313,42 @@ class CycleStateMachine:
         if cycle is None:
             raise RuntimeError("cannot finalize without an active cycle")
 
-        epcs = self._decision_epcs()
-        garment = self.repository.garment_by_epc(epcs[0]) if len(epcs) == 1 else None
-        result = evaluate_cycle(
-            epcs=epcs,
-            measured_weight_g=measured_weight_g,
-            stable=stable,
-            garment=garment,
-            settings=self.settings,
-        )
-        write = CycleWrite(
-            cycle_id=cycle.cycle_id,
-            started_at=cycle.started_at,
-            completed_at=completed_at,
-            garment_id=result.garment.garment_id if result.garment else None,
-            reference_id=result.garment.reference_id if result.garment else None,
-            measured_weight_mg=result.measured_weight_mg,
-            reference_weight_mg=result.reference_weight_mg,
-            difference_mg=result.difference_mg,
-            threshold_mg=round(self.settings.threshold_g * 1_000),
-            decision=result.decision.value,
-            reason=result.reason.value,
-            protocol_version=1,
-            algorithm_version=self.settings.algorithm_version,
-            calibration_version=cycle.calibration_version,
-            tags=tuple(stat.freeze() for stat in cycle.tags.values()),
-        )
         try:
+            epcs = self._decision_epcs()
+            garment = self.repository.garment_by_epc(epcs[0]) if len(epcs) == 1 else None
+            result = evaluate_cycle(
+                epcs=epcs,
+                measured_weight_g=measured_weight_g,
+                stable=stable,
+                garment=garment,
+                settings=self.settings,
+            )
+            write = CycleWrite(
+                cycle_id=cycle.cycle_id,
+                started_at=cycle.started_at,
+                completed_at=completed_at,
+                garment_id=result.garment.garment_id if result.garment else None,
+                reference_id=result.garment.reference_id if result.garment else None,
+                measured_weight_mg=result.measured_weight_mg,
+                reference_weight_mg=result.reference_weight_mg,
+                difference_mg=result.difference_mg,
+                threshold_mg=round(self.settings.threshold_g * 1_000),
+                decision=result.decision.value,
+                reason=result.reason.value,
+                protocol_version=1,
+                algorithm_version=self.settings.algorithm_version,
+                calibration_version=cycle.calibration_version,
+                tags=tuple(stat.freeze() for stat in cycle.tags.values()),
+            )
             self.repository.persist_cycle(self.context, write)
-        except RepositoryError:
-            raise
         except Exception:
-            logger.exception("failed to persist measurement cycle")
-            self.database_ok = False
-            self._reset_cycle(require_empty=True)
-            self.lifecycle = Lifecycle.UNAVAILABLE
-            self.reason = DecisionReason.DATABASE_ERROR
-            return self._snapshot()
+            logger.exception("database operation failed while finalizing measurement cycle")
+            return self.on_database_error()
 
         self.result = result
         self.result_garment = result.garment
+        if result.garment is not None:
+            self.scanned_count += 1
         self.lifecycle = Lifecycle.PASS if result.decision is Decision.PASS else Lifecycle.CHECK
         self.reason = result.reason
         return self._snapshot(stable=stable)
@@ -326,7 +357,7 @@ class CycleStateMachine:
         self.active_cycle = None
         self.result = None
         self.result_garment = None
-        self.empty_samples = 0
+        self.empty_weights.clear()
         self.needs_empty = require_empty
 
     def _health(self, now_monotonic: float | None = None) -> HealthSnapshot:
@@ -351,6 +382,7 @@ class CycleStateMachine:
         measured_weight_g: float | None = None,
         stable: bool = False,
         feedback_recorded: bool = False,
+        feedback_category: InspectionCategory | None = None,
         now_monotonic: float | None = None,
     ) -> DisplaySnapshot:
         garment = self.result_garment
@@ -365,12 +397,6 @@ class CycleStateMachine:
             reference_mg = self.result.reference_weight_mg
             difference_mg = self.result.difference_mg
             measured_weight_g = measured_mg / 1_000 if measured_mg is not None else None
-        elif self.active_cycle is not None and len(self.active_cycle.tags) == 1:
-            epc = next(iter(self.active_cycle.tags))
-            garment = self.repository.garment_by_epc(epc)
-            reference_mg = garment.reference_weight_mg if garment else None
-            if measured_weight_g is not None and reference_mg is not None:
-                difference_mg = round(measured_weight_g * 1_000) - reference_mg
 
         measurement = None
         if measured_weight_g is not None or reference_mg is not None:
@@ -389,11 +415,12 @@ class CycleStateMachine:
             cycle_id=cycle_id,
             decision=decision,
             reason=self.reason,
-            scanned_count=self.repository.completed_known_cycle_count(),
+            scanned_count=self.scanned_count,
             station=self.context.station,
             operator=self.context.operator,
             garment=garment.garment if garment else None,
             measurement=measurement,
             health=self._health(now_monotonic),
             feedback_recorded=feedback_recorded,
+            feedback_category=feedback_category,
         )

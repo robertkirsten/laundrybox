@@ -3,17 +3,18 @@
 #include <stdlib.h>
 
 #include "HX711.h"
+#include <config.h>
+
+static_assert(sizeof(kLoadcellDoutPins) / sizeof(kLoadcellDoutPins[0]) == kNumLoadCells,
+              "kLoadcellDoutPins must have exactly kNumLoadCells entries");
+static_assert(sizeof(kLoadcellSckPins) / sizeof(kLoadcellSckPins[0]) == kNumLoadCells,
+              "kLoadcellSckPins must have exactly kNumLoadCells entries");
+static_assert(sizeof(kLoadcellPolarities) / sizeof(kLoadcellPolarities[0]) == kNumLoadCells,
+              "kLoadcellPolarities must have exactly kNumLoadCells entries");
 
 namespace {
 
-constexpr uint8_t LOADCELL_DOUT_PIN = 2;
-constexpr uint8_t LOADCELL_SCK_PIN = 3;
-
-constexpr uint8_t TARE_SAMPLES = 20;
-constexpr uint8_t CALIBRATION_SAMPLES = 20;
-constexpr float MIN_REFERENCE_SIGNAL_COUNTS = 100.0f;
-
-HX711 scale;
+HX711 gCells[kNumLoadCells];
 
 void haltWithError(const char *message) {
   Serial.print("ERROR: ");
@@ -81,22 +82,30 @@ float readCalibrationMassG() {
 }
 
 void runCalibration(float calibrationMassG) {
-  // A scale factor of 1 makes get_value() return tared raw ADC counts.
-  scale.set_scale(1.0f);
-
   Serial.println();
   Serial.println("Step 1/2: Prepare the empty scale");
   Serial.println("Leave the plate/box installed and remove every loose object.");
   Serial.println("Press Enter when the scale is empty and stable.");
   waitForEnter();
 
-  if (!scale.wait_ready_timeout(3000)) {
-    Serial.println("ERROR: HX711 not ready. Calibration cancelled.");
-    return;
-  }
+  // Tare every cell
+  for (uint8_t i = 0; i < kNumLoadCells; i++) {
+    // A scale factor of 1 makes get_value() return tared raw ADC counts.
+    gCells[i].set_scale(1.0f);
 
-  Serial.println("Taring...");
-  scale.tare(TARE_SAMPLES);
+    if (!gCells[i].wait_ready_timeout(3000)) {
+      Serial.print("ERROR: HX711 cell ");
+      Serial.print(i);
+      Serial.println(" not ready. Calibration cancelled.");
+      return;
+    }
+
+    Serial.print("Taring cell ");
+    Serial.print(i);
+    Serial.print(" ... ");
+    gCells[i].tare(kTareSamples);
+    Serial.println("done");
+  }
 
   Serial.println();
   Serial.println("Step 2/2: Measure the reference object");
@@ -106,36 +115,56 @@ void runCalibration(float calibrationMassG) {
   Serial.println("Press Enter when the reading is stable.");
   waitForEnter();
 
-  if (!scale.wait_ready_timeout(3000)) {
-    Serial.println("ERROR: HX711 not ready. Calibration cancelled.");
-    return;
+  // Read tared counts from every cell and sum them
+  float combinedCounts = 0.0f;
+  float cellReadings[kNumLoadCells];
+  for (uint8_t i = 0; i < kNumLoadCells; i++) {
+    if (!gCells[i].wait_ready_timeout(3000)) {
+      Serial.print("ERROR: HX711 cell ");
+      Serial.print(i);
+      Serial.println(" not ready. Calibration cancelled.");
+      return;
+    }
+
+    Serial.print("Sampling cell ");
+    Serial.print(i);
+    Serial.print(" ... ");
+    const float cellCounts = gCells[i].get_value(kCalibrationSamples) * kLoadcellPolarities[i];
+    Serial.println(cellCounts, 3);
+    cellReadings[i] = cellCounts;
+    combinedCounts += cellCounts;
   }
 
-  Serial.println("Sampling...");
-  const float rawReferenceCounts = scale.get_value(CALIBRATION_SAMPLES);
-
-  if (!isfinite(rawReferenceCounts) ||
-      fabsf(rawReferenceCounts) < MIN_REFERENCE_SIGNAL_COUNTS) {
+  if (!isfinite(combinedCounts) ||
+      fabsf(combinedCounts) < kMinReferenceSignalCounts) {
     Serial.println(
-        "ERROR: Reference signal is too small. Check the wiring, mounting, and sequence.");
+        "ERROR: Combined reference signal is too small. "
+        "Check the wiring, mounting, and sequence.");
     return;
   }
 
-  const float calibrationFactor = rawReferenceCounts / calibrationMassG;
+  const float calibrationFactor = combinedCounts / calibrationMassG;
 
   Serial.println();
   Serial.println("Calibration complete");
-  Serial.print("Tared raw reading: ");
-  Serial.println(rawReferenceCounts, 3);
-  Serial.print("Calibration factor: ");
+  for (uint8_t i = 0; i < kNumLoadCells; i++) {
+    Serial.print("  Cell ");
+    Serial.print(i);
+    Serial.print(" tared reading: ");
+    Serial.println(cellReadings[i], 3);
+  }
+  Serial.print("  Combined tared reading: ");
+  Serial.println(combinedCounts, 3);
+  Serial.print("  Calibration factor: ");
   Serial.print(calibrationFactor, 6);
   Serial.println(" raw counts/gram");
+
   Serial.println();
-  Serial.println("Use this value with the HX711 library:");
-  Serial.print("scale.set_scale(");
+  Serial.println("Copy this into firmware/include/config.h:");
+  Serial.print("  constexpr float kCalibrationFactor = ");
   Serial.print(calibrationFactor, 6);
-  Serial.println("f);");
-  Serial.println("After calling scale.tare(), scale.get_units() will return grams.");
+  Serial.println("f;");
+
   Serial.println();
   Serial.println("Remove the object. A new calibration can now be started.");
 }
@@ -151,13 +180,27 @@ void setup() {
   }
 
   Serial.println();
-  Serial.println("HX711 calibration firmware");
+  Serial.print("HX711 multi-cell calibration firmware (");
+  Serial.print(kNumLoadCells);
+  Serial.println(" load cells)");
   Serial.println("Serial speed: 57600 baud");
   Serial.println("Configure the serial monitor to send a line ending.");
 
-  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
-  if (!scale.wait_ready_timeout(3000)) {
-    haltWithError("HX711 not found. Check power and wiring.");
+  for (uint8_t i = 0; i < kNumLoadCells; i++) {
+    gCells[i].begin(kLoadcellDoutPins[i], kLoadcellSckPins[i]);
+    if (!gCells[i].wait_ready_timeout(3000)) {
+      Serial.print("HX711 cell ");
+      Serial.print(i);
+      Serial.print(" not found (DOUT=");
+      Serial.print(kLoadcellDoutPins[i]);
+      Serial.print(", SCK=");
+      Serial.print(kLoadcellSckPins[i]);
+      Serial.println("). Check power and wiring.");
+      haltWithError("HX711 initialisation failed.");
+    }
+    Serial.print("Cell ");
+    Serial.print(i);
+    Serial.println(" ready");
   }
 }
 

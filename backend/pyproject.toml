@@ -32,6 +32,9 @@ argus-backend = "argus_backend.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/argus_backend"]
 
+[tool.hatch.build.force-include]
+"src/argus_backend/fixtures/mock_garments.csv" = "argus_backend/fixtures/mock_garments.csv"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

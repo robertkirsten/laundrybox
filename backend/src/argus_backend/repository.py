@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
@@ -21,6 +24,7 @@ from .models import (
     Wearer,
 )
 from .schemas import (
+    GarmentSeed,
     GarmentSnapshot,
     InspectionCategory,
     InspectionRequest,
@@ -96,6 +100,7 @@ class Repository:
         self._settings = settings
 
     def seed_mock_data(self) -> None:
+        fixtures = self._load_mock_fixtures()
         with session_scope(self._factory) as session:
             station = session.scalar(
                 select(Station).where(Station.code == self._settings.station_code)
@@ -114,69 +119,45 @@ class Repository:
                 )
                 session.add(operator)
 
-            customer = session.scalar(select(Customer).where(Customer.customer_number == "K-20441"))
-            if customer is None:
-                customer = Customer(customer_number="K-20441", name="Müller & Co.")
-                session.add(customer)
-                session.flush()
-
-            wearer = session.scalar(select(Wearer).where(Wearer.wearer_number == "T-8821"))
-            if wearer is None:
-                wearer = Wearer(
-                    wearer_number="T-8821",
-                    display_name="Sabine Weber",
-                    customer_id=customer.id,
-                )
-                session.add(wearer)
-                session.flush()
-
-            fixtures = (
-                {
-                    "epc": "E28011052000773410000001",
-                    "chute_number": 911,
-                    "id_number": "77341",
-                    "article_number": "A-5521",
-                    "product_name": "Hose Blau",
-                    "size": "L",
-                    "manufacture_year": 2020,
-                    "manufacture_week": 8,
-                    "reference_mg": 240_000,
-                },
-                {
-                    "epc": "E28011052000773420000002",
-                    "chute_number": 912,
-                    "id_number": "77342",
-                    "article_number": "A-7810",
-                    "product_name": "Jacke Grau",
-                    "size": "M",
-                    "manufacture_year": 2021,
-                    "manufacture_week": 17,
-                    "reference_mg": 620_000,
-                },
-                {
-                    "epc": "E28011052000773430000003",
-                    "chute_number": 913,
-                    "id_number": "77343",
-                    "article_number": "A-3142",
-                    "product_name": "Hemd Weiß",
-                    "size": "XL",
-                    "manufacture_year": 2022,
-                    "manufacture_week": 4,
-                    "reference_mg": 180_000,
-                },
-            )
             for fixture in fixtures:
-                garment = session.scalar(select(Garment).where(Garment.epc == fixture["epc"]))
+                customer = session.scalar(
+                    select(Customer).where(Customer.customer_number == fixture.customer_number)
+                )
+                if customer is None:
+                    customer = Customer(
+                        customer_number=fixture.customer_number,
+                        name=fixture.customer_name,
+                    )
+                    session.add(customer)
+                    session.flush()
+
+                wearer = session.scalar(
+                    select(Wearer).where(Wearer.wearer_number == fixture.wearer_number)
+                )
+                if wearer is None:
+                    wearer = Wearer(
+                        wearer_number=fixture.wearer_number,
+                        display_name=fixture.wearer_name,
+                        customer_id=customer.id,
+                    )
+                    session.add(wearer)
+                    session.flush()
+                elif wearer.customer_id != customer.id:
+                    raise RepositoryError(
+                        f"wearer {fixture.wearer_number} belongs to a different customer"
+                    )
+
+                garment = session.scalar(select(Garment).where(Garment.epc == fixture.epc))
                 if garment is None:
                     garment = Garment(
-                        epc=str(fixture["epc"]),
-                        chute_number=int(fixture["chute_number"]),
-                        id_number=str(fixture["id_number"]),
-                        article_number=str(fixture["article_number"]),
-                        product_name=str(fixture["product_name"]),
-                        size=str(fixture["size"]),
-                        manufacture_year=int(fixture["manufacture_year"]),
-                        manufacture_week=int(fixture["manufacture_week"]),
+                        epc=fixture.epc,
+                        chute_number=fixture.chute_number,
+                        id_number=fixture.id_number,
+                        article_number=fixture.article_number,
+                        product_name=fixture.product_name,
+                        size=fixture.size,
+                        manufacture_year=fixture.manufacture_year,
+                        manufacture_week=fixture.manufacture_week,
                         customer_id=customer.id,
                         wearer_id=wearer.id,
                     )
@@ -193,10 +174,10 @@ class Repository:
                     session.add(
                         GarmentReference(
                             garment_id=garment.id,
-                            weight_mg=int(fixture["reference_mg"]),
+                            weight_mg=round(fixture.reference_weight_g * 1_000),
                             recorded_at=utc_now(),
-                            source="mock_seed",
-                            calibration_version="mock-1",
+                            source=fixture.source,
+                            calibration_version=fixture.calibration_version,
                         )
                     )
 
@@ -214,6 +195,22 @@ class Repository:
                         created_at=utc_now(),
                     )
                 )
+
+    def _load_mock_fixtures(self) -> tuple[GarmentSeed, ...]:
+        path = self._settings.mock_data_path or (
+            Path(__file__).parent / "fixtures" / "mock_garments.csv"
+        )
+        try:
+            with path.open(newline="", encoding="utf-8") as csv_file:
+                rows = tuple(csv.DictReader(csv_file))
+        except OSError as error:
+            raise RepositoryError(f"cannot read mock garment CSV {path}: {error}") from error
+        if not rows:
+            raise RepositoryError(f"mock garment CSV {path} contains no data rows")
+        try:
+            return tuple(GarmentSeed.model_validate(row) for row in rows)
+        except ValidationError as error:
+            raise RepositoryError(f"invalid mock garment CSV {path}: {error}") from error
 
     def runtime_context(self) -> RuntimeContext:
         with session_scope(self._factory) as session:

@@ -7,8 +7,8 @@ from sqlalchemy import select
 from argus_backend.config import Settings
 from argus_backend.database import session_scope
 from argus_backend.models import ScanCycle
-from argus_backend.repository import Repository
-from argus_backend.schemas import Decision, DecisionReason, Lifecycle, TeensyReport
+from argus_backend.repository import Repository, RepositoryError
+from argus_backend.schemas import Decision, DecisionReason, Lifecycle, TeensyEvent, TeensyReport
 from argus_backend.state_machine import CycleStateMachine
 
 EPC = "E28011052000773410000001"
@@ -116,3 +116,67 @@ def test_acquisition_timeout_persists_check_when_tag_is_missing(
     assert timed_out.decision is Decision.CHECK
     assert timed_out.reason is DecisionReason.MISSING_TAG
     assert timed_out.scanned_count == 0
+
+
+def test_empty_confirmation_requires_a_stable_near_zero_band(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    machine.on_serial_connected()
+
+    assert machine.on_report(report(-50.0), now_monotonic=0.0).lifecycle is Lifecycle.UNAVAILABLE  # type: ignore[union-attr]
+    assert machine.on_report(report(0.0), now_monotonic=0.1) is None
+    assert machine.on_report(report(5.0), now_monotonic=0.2) is None
+    assert machine.on_report(report(0.0), now_monotonic=0.3) is None
+
+    waiting = machine.on_report(report(0.2), now_monotonic=0.4)
+    assert waiting is not None
+    assert waiting.lifecycle is Lifecycle.WAITING
+
+
+def test_rfid_configuration_fault_is_latched_until_boot(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    machine.on_serial_connected()
+    fault = machine.on_event(TeensyEvent(v=1, event="rfid_config_error", step="eu_region"))
+    assert fault.reason is DecisionReason.RFID_CONFIGURATION_ERROR
+
+    blocked = machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.1)
+    assert blocked is not None
+    assert blocked.lifecycle is Lifecycle.UNAVAILABLE
+    assert blocked.decision is None
+    assert not blocked.health.rfid_ok
+
+    machine.on_event(TeensyEvent(v=1, event="boot"), now_monotonic=0.2)
+    machine.on_report(report(0.0), now_monotonic=0.3)
+    waiting = machine.on_report(report(0.0), now_monotonic=0.4)
+    assert waiting is not None
+    assert waiting.lifecycle is Lifecycle.WAITING
+
+
+def test_database_failure_forces_unavailable_and_never_passes(
+    settings: Settings, repository: Repository, monkeypatch
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    machine.on_serial_connected()
+    machine.on_report(report(0.0), now_monotonic=0.0)
+    machine.on_report(report(0.0), now_monotonic=0.1)
+    machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.2)
+
+    def fail_lookup(_epc: str):
+        raise RepositoryError("simulated database failure")
+
+    monkeypatch.setattr(repository, "garment_by_epc", fail_lookup)
+    failed = machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.3)
+    assert failed is not None
+    assert failed.lifecycle is Lifecycle.UNAVAILABLE
+    assert failed.decision is None
+    assert failed.reason is DecisionReason.DATABASE_ERROR
+    assert not failed.health.database_ok
+    assert failed.scanned_count == 0
+
+    still_failed = machine.on_report(report(0.0), now_monotonic=0.4)
+    assert still_failed is not None
+    assert still_failed.reason is DecisionReason.DATABASE_ERROR
+    assert still_failed.decision is None
