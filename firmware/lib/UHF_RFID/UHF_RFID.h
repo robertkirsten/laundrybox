@@ -36,6 +36,11 @@ public:
     // 15.00-26.00 dBm depending on the module/antenna. Returns false on timeout.
     bool setTxPower(uint16_t dBm_x100, uint32_t timeoutMs = 200);
 
+    // Enter or leave the module's IDLE mode. In IDLE mode the U107 keeps its
+    // UART and configuration active, but switches off its analog and RF power
+    // supplies. This is preferable to sleep because sleep resets the RF chip.
+    bool setIdleMode(bool idle, uint32_t timeoutMs = 200);
+
 private:
     static constexpr uint8_t kHeader = 0xBB;
     static constexpr uint8_t kEnd    = 0x7E;
@@ -48,4 +53,8 @@ private:
     // that happen to equal 0x7E/0xBB don't confuse it. Returns frame length in
     // bytes, or -1 on timeout / malformed frame.
     int readFrame(uint8_t *buf, size_t bufSize, uint32_t timeoutMs);
+
+    // Wait for an acknowledgement to `expectedCmd`, ignoring any delayed tag
+    // notifications left over from the preceding inventory operation.
+    bool waitForOkResponse(uint8_t expectedCmd, uint32_t timeoutMs);
 };

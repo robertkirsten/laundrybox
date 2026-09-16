@@ -9,6 +9,10 @@ constexpr unsigned long kRfidBaud    = 115200;
 constexpr uint16_t      kRfidTxPower = 2600;   // dBm * 100 = 26.00 dBm
 constexpr unsigned long kRfidWindowMs      = 100;  // ms spent polling RFID before weighing
 constexpr uint32_t      kRfidPollTimeoutMs = 50;   // single pollOnce() timeout
+constexpr uint32_t      kRfidCommandTimeoutMs = 200; // IDLE-mode command timeout
+constexpr uint8_t       kRfidCommandRetries   = 3;
+constexpr unsigned long kRfidStartupDelayMs   = 500; // U107 boot time after UART starts
+constexpr unsigned long kRfidWakeDelayMs      = 20;  // RF circuitry startup before polling
 
 constexpr uint8_t kNumLoadCells        = 1;
 constexpr uint8_t kLoadcellDoutPins[]  = {2};//, 4};
@@ -22,7 +26,10 @@ constexpr float   kCalibrationFactor = 107.026405f;
 constexpr uint8_t kTareSamples       = 20;
 
 constexpr uint8_t       kWeightSamples      = 2;    // averaged ADC reads per measurement
-constexpr uint8_t       kSettleConversions  = 2;    // HX711 reads to discard after RFID stops
+// At the measured ~10.5 SPS, five discarded conversions put the first retained
+// sample beyond the HX711's specified 400 ms settling interval. The first
+// discard can be immediately ready because it was converted during RFID scan.
+constexpr uint8_t       kSettleConversions  = 5;
 constexpr unsigned long kMinCyclePeriodMs   = 250;  // minimum cycle time (floor, not fixed cadence)
 constexpr uint32_t      kAdcReadyMs         = 200;  // max wait for an ADC sample
 

@@ -38,6 +38,26 @@ struct TagObs {
 TagObs        gTags[kMaxTagsPerReport];
 uint8_t       gTagCount = 0;
 
+bool setRfidIdleMode(bool idle) {
+    for (uint8_t attempt = 0; attempt < kRfidCommandRetries; attempt++) {
+        if (reader.setIdleMode(idle, kRfidCommandTimeoutMs)) {
+            return true;
+        }
+        delay(5);
+    }
+    return false;
+}
+
+bool setRfidTxPower() {
+    for (uint8_t attempt = 0; attempt < kRfidCommandRetries; attempt++) {
+        if (reader.setTxPower(kRfidTxPower, kRfidCommandTimeoutMs)) {
+            return true;
+        }
+        delay(5);
+    }
+    return false;
+}
+
 
 void recordTag(const UHF_RFID::Tag &tag) {
     char epc[UHF_RFID::kMaxEpc * 2 + 1] = {0};
@@ -56,17 +76,19 @@ void recordTag(const UHF_RFID::Tag &tag) {
     }
 }
 
-void emitReport() {
+void emitReport(bool weightAllowed = true) {
     long rawSum    = 0;
     long offsetSum = 0;
-    bool ready     = true;
-    for (uint8_t i = 0; i < kNumLoadCells; i++) {
-        if (!gCells[i].wait_ready_timeout(kAdcReadyMs)) {
-            ready = false;
-            break;
+    bool ready     = weightAllowed;
+    if (weightAllowed) {
+        for (uint8_t i = 0; i < kNumLoadCells; i++) {
+            if (!gCells[i].wait_ready_timeout(kAdcReadyMs)) {
+                ready = false;
+                break;
+            }
+            rawSum    += gCells[i].read_average(kWeightSamples) * kLoadcellPolarities[i];
+            offsetSum += gCells[i].get_offset() * kLoadcellPolarities[i];
         }
-        rawSum    += gCells[i].read_average(kWeightSamples) * kLoadcellPolarities[i];
-        offsetSum += gCells[i].get_offset() * kLoadcellPolarities[i];
     }
 
     HOST_SERIAL.print("{\"v\":1,\"t\":");
@@ -110,7 +132,24 @@ void setup() {
     while (!HOST_SERIAL && millis() - start < 3000) {}
 
     reader.begin(RFID_SERIAL, kRfidBaud);
-    reader.setTxPower(kRfidTxPower);
+    delay(kRfidStartupDelayMs);
+
+    // Some U107 firmware revisions do not acknowledge the transmit-power
+    // command even though inventory remains operational. This setting was
+    // historically best-effort, so keep it non-fatal and preserve the value
+    // already stored by the module when no acknowledgement arrives.
+    if (!setRfidTxPower()) {
+        HOST_SERIAL.println(
+            "RFID warning: transmit-power command was not acknowledged; using stored power");
+    }
+
+    // IDLE acknowledgement is mandatory: do not tare or sample the scale until
+    // the reader has confirmed that its analog and RF supplies are off.
+    while (!setRfidIdleMode(true)) {
+        HOST_SERIAL.println(R"({"v":1,"event":"rfid_config_error"})");
+        HOST_SERIAL.println("RFID diagnostic: IDLE command failed");
+        delay(1000);
+    }
 
     analogReadResolution(kMetalAdcBits);   // ferrous-metal detector on A0
 
@@ -144,26 +183,43 @@ void setup() {
 void loop() {
     const unsigned long cycleStart = millis();
 
-    // ── Phase 1: RFID scan window (RF active) ──
-    const unsigned long rfidStart = millis();
-    while (millis() - rfidStart < kRfidWindowMs) {
-        UHF_RFID::Tag tag;
-        if (reader.pollOnce(tag, kRfidPollTimeoutMs)) {
-            recordTag(tag);
-        }
-    }
+    // ── Phase 1: wake the RF circuitry and scan ──
+    const bool readerAwake = setRfidIdleMode(false);
+    if (readerAwake) {
+        delay(kRfidWakeDelayMs);
 
-    // ── Phase 2: Settle (RF off, discard contaminated HX711 conversions) ──
-    for (uint8_t i = 0; i < kNumLoadCells; i++) {
-        for (uint8_t s = 0; s < kSettleConversions; s++) {
-            if (gCells[i].wait_ready_timeout(kAdcReadyMs)) {
-                gCells[i].read();   // discard
+        const unsigned long rfidStart = millis();
+        while (millis() - rfidStart < kRfidWindowMs) {
+            UHF_RFID::Tag tag;
+            if (reader.pollOnce(tag, kRfidPollTimeoutMs)) {
+                recordTag(tag);
             }
         }
     }
 
-    // ── Phase 3: Measure and emit (RF off, clean reads) ──
-    emitReport();
+    // ── Phase 2: explicitly switch off analog/RF power ──
+    // A weight is valid only after the U107 acknowledges IDLE mode. Merely
+    // stopping inventory commands does not guarantee that the RF circuitry is
+    // powered down.
+    const bool readerIdle = setRfidIdleMode(true);
+
+    // ── Phase 3: settle the HX711 digital filter ──
+    bool scaleSettled = readerIdle;
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+        for (uint8_t s = 0; s < kSettleConversions; s++) {
+            if (!scaleSettled) break;
+            if (!gCells[i].wait_ready_timeout(kAdcReadyMs)) {
+                scaleSettled = false;
+                break;
+            }
+            gCells[i].read();   // discard
+        }
+    }
+
+    // ── Phase 4: measure while the U107 remains in IDLE ──
+    // If either the RF shutdown or HX711 settling failed, emit null weight
+    // values rather than presenting contaminated data as a real measurement.
+    emitReport(scaleSettled);
     gTagCount = 0;
 
     // ── Pace: enforce minimum cycle time ──

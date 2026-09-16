@@ -77,6 +77,30 @@ int UHF_RFID::readFrame(uint8_t *buf, size_t bufSize, uint32_t timeoutMs) {
     return (int)idx;
 }
 
+bool UHF_RFID::waitForOkResponse(uint8_t expectedCmd, uint32_t timeoutMs) {
+    const uint32_t start = millis();
+
+    while ((uint32_t)(millis() - start) < timeoutMs) {
+        const uint32_t elapsed = millis() - start;
+        uint8_t buf[64];
+        const int n = readFrame(buf, sizeof(buf), timeoutMs - elapsed);
+        if (n < 0) return false;
+
+        // M100 firmware versions are inconsistent about the Type byte. The
+        // command code is the reliable way to associate a non-error response
+        // with the command that is currently pending (the same rule used by
+        // M5Stack's current UnitJRD4035 driver).
+        if (buf[2] == expectedCmd) {
+            return true;
+        }
+
+        // A single inventory command can produce delayed tag notifications.
+        // Ignore those here and continue waiting for the command response.
+    }
+
+    return false;
+}
+
 bool UHF_RFID::pollOnce(Tag &tag, uint32_t timeoutMs) {
     if (!_serial) return false;
 
@@ -137,8 +161,22 @@ bool UHF_RFID::setTxPower(uint16_t dBm_x100, uint32_t timeoutMs) {
 
     const uint8_t param[2] = { (uint8_t)(dBm_x100 >> 8), (uint8_t)(dBm_x100 & 0xFF) };
     sendFrame(0x00, 0xB6, param, 2);
+    return waitForOkResponse(0xB6, timeoutMs);
+}
 
-    uint8_t buf[64];
-    int n = readFrame(buf, sizeof(buf), timeoutMs);
-    return (n >= 0 && buf[2] == 0xB6);
+bool UHF_RFID::setIdleMode(bool idle, uint32_t timeoutMs) {
+    if (!_serial) return false;
+
+    // IDLE command (0x04):
+    //   byte 0: 1 enters IDLE, 0 leaves IDLE
+    //   byte 1: reserved, fixed at 1
+    //   byte 2: automatic-IDLE timeout in minutes; 0 disables it
+    const uint8_t params[3] = {idle ? (uint8_t)0x01 : (uint8_t)0x00,
+                               0x01, 0x00};
+
+    // Remove frames already buffered before sending the state-change command.
+    // waitForOkResponse() also tolerates a frame that arrives just afterward.
+    while (_serial->available()) _serial->read();
+    sendFrame(0x00, 0x04, params, sizeof(params));
+    return waitForOkResponse(0x04, timeoutMs);
 }
