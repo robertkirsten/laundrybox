@@ -68,6 +68,11 @@ class StationService:
         async with self._lock:
             try:
                 if isinstance(message, TeensyReport):
+                    if message.auto_tare:
+                        logger.info(
+                            "scale auto-tared after garment removal; residual_g=%s",
+                            message.tare_residual_g,
+                        )
                     snapshot = self.machine.on_report(message)
                 elif isinstance(message, TeensyEvent):
                     snapshot = self.machine.on_event(message)
@@ -99,7 +104,9 @@ class StationService:
                 logger.exception("feedback write failed; station forced unavailable")
                 await self.broker.publish(self.machine.on_database_error())
                 raise
-            await self.broker.mark_feedback_recorded(cycle_id, response.category)
+            snapshot = self.machine.mark_feedback_recorded(cycle_id, response.category)
+            if snapshot is not None:
+                await self.broker.publish(snapshot)
             return response
 
     async def _monitor(self) -> None:

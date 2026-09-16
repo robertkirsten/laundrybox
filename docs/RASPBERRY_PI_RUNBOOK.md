@@ -165,8 +165,8 @@ sudo nano /etc/argus/argus.env
 sudo argusctl restart
 ```
 
-Current weight stability defaults are six consecutive readings within a total
-2 g range. The 10-second acquisition timeout remains the fallback.
+Current weight stability defaults are three consecutive readings within a total
+2 g range. The 6-second acquisition timeout remains the fallback.
 
 The garment CSV is copied to `/etc/argus/mock_garments.csv` only on first
 installation, so deployments do not overwrite local garments. New rows are

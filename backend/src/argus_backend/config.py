@@ -38,10 +38,10 @@ class Settings(BaseSettings):
     min_garment_weight_g: float = Field(default=50.0, gt=0)
     max_garment_weight_g: float = Field(default=1_000.0, gt=0)
     stability_tolerance_g: float = Field(default=2.0, ge=0)
-    stability_window_size: int = Field(default=6, ge=2, le=1_000)
-    removal_confirm_samples: int = Field(default=4, ge=2, le=1_000)
+    stability_window_size: int = Field(default=3, ge=2, le=1_000)
+    removal_confirm_samples: int = Field(default=3, ge=2, le=1_000)
     minimum_tag_reads: int = Field(default=2, ge=1, le=1_000)
-    acquisition_timeout_s: float = Field(default=10.0, gt=0)
+    acquisition_timeout_s: float = Field(default=6.0, gt=0)
     monitor_interval_s: float = Field(default=0.25, gt=0)
 
     station_code: str = "ARGUS-01"

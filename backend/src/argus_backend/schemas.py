@@ -12,7 +12,8 @@ from pydantic import (
     field_validator,
 )
 
-StrictModelConfig = ConfigDict(extra="forbid", allow_inf_nan=False)
+ModelConfig = ConfigDict(extra="ignore", allow_inf_nan=False)
+StrictInputModelConfig = ConfigDict(extra="forbid", allow_inf_nan=False)
 Epc = Annotated[
     str,
     StringConstraints(strip_whitespace=True, to_upper=True, min_length=2, max_length=64),
@@ -20,7 +21,7 @@ Epc = Annotated[
 
 
 class TagObservation(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     epc: Epc
     rssi: int = Field(ge=0, le=255)
@@ -36,7 +37,7 @@ class TagObservation(BaseModel):
 class GarmentSeed(BaseModel):
     """Validated row from the operator-editable mock garment CSV."""
 
-    model_config = StrictModelConfig
+    model_config = StrictInputModelConfig
 
     epc: Epc
     chute_number: int = Field(gt=0)
@@ -63,7 +64,7 @@ class GarmentSeed(BaseModel):
 
 
 class TeensyReport(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     v: Literal[1]
     t: int = Field(ge=0)
@@ -72,12 +73,14 @@ class TeensyReport(BaseModel):
     tags: list[TagObservation] = Field(max_length=64)
     stable: bool | None = None
     metal: bool | None = None
+    auto_tare: bool = False
+    tare_residual_g: float | None = None
     load_cells_g: list[float] | None = Field(default=None, max_length=8)
     calibration_version: str | None = Field(default=None, max_length=64)
 
 
 class TeensyEvent(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     v: Literal[1]
     event: Literal["boot", "rfid_config_error"]
@@ -124,7 +127,7 @@ class DecisionReason(StrEnum):
 
 
 class HealthSnapshot(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     backend_ok: bool = True
     database_ok: bool = True
@@ -135,21 +138,21 @@ class HealthSnapshot(BaseModel):
 
 
 class StationSnapshot(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     code: str
     name: str
 
 
 class OperatorSnapshot(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     number: str
     display_name: str
 
 
 class GarmentSnapshot(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     epc: str
     chute_number: int
@@ -166,7 +169,7 @@ class GarmentSnapshot(BaseModel):
 
 
 class MeasurementSnapshot(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     reference_g: float | None
     measured_g: float | None
@@ -189,7 +192,7 @@ class InspectionCategory(StrEnum):
 
 
 class DisplaySnapshot(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     revision: int = Field(ge=0)
     updated_at: datetime
@@ -219,7 +222,7 @@ class InspectionRequest(BaseModel):
 
 
 class InspectionResponse(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     cycle_id: str
     category: InspectionCategory
@@ -228,7 +231,7 @@ class InspectionResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    model_config = StrictModelConfig
+    model_config = ModelConfig
 
     status: Literal["ok", "degraded"]
     version: str

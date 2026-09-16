@@ -24,6 +24,7 @@ from .schemas import (
     DisplaySnapshot,
     HealthSnapshot,
     InspectionCategory,
+    InspectionRequest,
     Lifecycle,
     MeasurementSnapshot,
     TeensyEvent,
@@ -83,6 +84,8 @@ class CycleStateMachine:
         self.active_cycle: ActiveCycle | None = None
         self.result: DecisionResult | None = None
         self.result_garment: GarmentLookup | None = None
+        self.result_removed = False
+        self.feedback_category: InspectionCategory | None = None
         self.lifecycle = Lifecycle.UNAVAILABLE
         self.reason = DecisionReason.SERIAL_DISCONNECTED
 
@@ -173,12 +176,39 @@ class CycleStateMachine:
             return self._snapshot()
 
         if self.result is not None:
-            if self._observe_empty(weight_g, report.stable):
-                self._reset_cycle(require_empty=False)
-                self.lifecycle = Lifecycle.WAITING
-                self.reason = DecisionReason.WAITING_FOR_GARMENT
-                return self._snapshot()
-            return None
+            if self.feedback_category is not None:
+                if self._observe_empty(weight_g, report.stable):
+                    self._reset_cycle(require_empty=False)
+                    self.lifecycle = Lifecycle.WAITING
+                    self.reason = DecisionReason.WAITING_FOR_GARMENT
+                    return self._snapshot()
+                return None
+
+            # Removing a completed garment is part of inspecting it, so keep
+            # its result and feedback controls visible while the box is empty.
+            # Once another garment is placed in the box, close the unanswered
+            # inspection as "nothing found" and let this report start the next
+            # measurement cycle.
+            if not self.result_removed:
+                # One near-zero report is enough to establish the transition:
+                # a completed garment is always above the configured minimum
+                # garment weight, and waiting for the normal empty-confirmation
+                # window could miss a quick remove-and-replace operation.
+                if abs(weight_g) <= self.settings.empty_weight_max_g:
+                    self.result_removed = True
+                    self.empty_weights.clear()
+                return None
+            if abs(weight_g) <= self.settings.empty_weight_max_g:
+                return None
+
+            cycle = self.active_cycle
+            if cycle is None:  # pragma: no cover - guarded by result lifecycle invariants
+                raise RuntimeError("completed result has no active cycle")
+            self.repository.add_feedback(
+                cycle.cycle_id,
+                InspectionRequest(category=InspectionCategory.NOTHING_FOUND),
+            )
+            self._reset_cycle(require_empty=False)
 
         if self.active_cycle is None:
             if abs(weight_g) <= self.settings.empty_weight_max_g:
@@ -239,7 +269,12 @@ class CycleStateMachine:
     ) -> DisplaySnapshot | None:
         if self.active_cycle is None or self.active_cycle.cycle_id != cycle_id:
             return None
-        return self._snapshot(feedback_recorded=True, feedback_category=category)
+        self.feedback_category = category
+        if self.result_removed:
+            self._reset_cycle(require_empty=False)
+            self.lifecycle = Lifecycle.WAITING
+            self.reason = DecisionReason.WAITING_FOR_GARMENT
+        return self._snapshot()
 
     def on_database_error(self) -> DisplaySnapshot:
         self.database_ok = False
@@ -357,6 +392,8 @@ class CycleStateMachine:
         self.active_cycle = None
         self.result = None
         self.result_garment = None
+        self.result_removed = False
+        self.feedback_category = None
         self.empty_weights.clear()
         self.needs_empty = require_empty
 
@@ -381,8 +418,6 @@ class CycleStateMachine:
         *,
         measured_weight_g: float | None = None,
         stable: bool = False,
-        feedback_recorded: bool = False,
-        feedback_category: InspectionCategory | None = None,
         now_monotonic: float | None = None,
     ) -> DisplaySnapshot:
         garment = self.result_garment
@@ -421,6 +456,6 @@ class CycleStateMachine:
             garment=garment.garment if garment else None,
             measurement=measurement,
             health=self._health(now_monotonic),
-            feedback_recorded=feedback_recorded,
-            feedback_category=feedback_category,
+            feedback_recorded=self.feedback_category is not None,
+            feedback_category=self.feedback_category,
         )

@@ -62,7 +62,7 @@ Power gate: verify the U107 5 V rail during RF transmission. Do not assume the P
 Current Teensy reports:
 
 ```json
-{"v":1,"t":12345,"raw":8342133,"weight_g":601.2,"tags":[{"epc":"E280...","rssi":210}]}
+{"v":1,"t":12345,"raw":8342133,"weight_g":601.2,"auto_tare":false,"tare_residual_g":null,"tags":[{"epc":"E280...","rssi":210}]}
 ```
 
 It emits `boot`; the backend also accepts a future `rfid_config_error` self-test event. The backend must validate version/size/types, timestamp reports with the Pi clock, tolerate malformed lines, and reconnect after USB removal. Use `/dev/ttyACM0` initially and add a udev-managed `/dev/argus-teensy` symlink before deployment.

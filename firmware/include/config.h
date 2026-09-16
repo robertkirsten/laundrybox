@@ -25,6 +25,17 @@ constexpr float kLoadcellPolarities[]  = {1.0f};//, -1.0f};
 constexpr float   kCalibrationFactor = 107.026405f;
 constexpr uint8_t kTareSamples       = 20;
 
+// Re-zero the empty box after a real garment has been removed. The upper
+// threshold stays below the backend's minimum accepted garment weight so a
+// valid garment can never be treated as the empty baseline.
+constexpr float   kAutoTareMaxResidualG        = 30.0f;
+constexpr float   kAutoTareLoadedMinG          = 50.0f;
+constexpr float   kAutoTareStabilityToleranceG = 2.0f;
+constexpr uint8_t kAutoTareStableSamples       = 3;
+static_assert(kAutoTareMaxResidualG < kAutoTareLoadedMinG,
+              "auto-tare residual must remain below the minimum garment weight");
+static_assert(kAutoTareStableSamples >= 2, "auto-tare requires multiple stable samples");
+
 constexpr uint8_t       kWeightSamples      = 2;    // averaged ADC reads per measurement
 // At the measured ~10.5 SPS, five discarded conversions put the first retained
 // sample beyond the HX711's specified 400 ms settling interval. The first

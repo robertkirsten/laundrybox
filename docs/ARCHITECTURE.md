@@ -51,21 +51,31 @@ gate; do not infer regulatory compliance from the firmware configuration.
 
 The current two load-cell readings are combined into one logical `raw` count
 and one `weight_g`. Load cell 2 has a temporary negative polarity correction
-because it is mounted upside down. Tare and calibration run at startup. Final
-mechanics, calibration, placement error, drift, load-cell diagnostics, and the
-3 g threshold still require physical validation.
+because it is mounted upside down. Tare and calibration run at startup. After
+the firmware has observed at least 50 g, a subsequent residual below 30 g is
+treated as a removal candidate. Three consecutive readings within a 2 g band
+are averaged and applied as a new empty-box offset exactly once for that
+loaded-to-empty transition. This compensates gradual box contamination and
+load-cell drift without running a blocking tare. Final mechanics, calibration,
+placement error, drift, load-cell diagnostics, and the 3 g threshold still
+require physical validation.
 
 The newline-delimited USB protocol is:
 
 ```json
 {"v":1,"event":"boot"}
-{"v":1,"t":12345,"raw":8342133,"weight_g":240.1,"tags":[{"epc":"E280...","rssi":210}]}
+{"v":1,"t":12345,"raw":8342133,"weight_g":240.1,"auto_tare":false,"tare_residual_g":null,"tags":[{"epc":"E280...","rssi":210}]}
 ```
 
-The backend enforces the protocol version, types, EPC format, maximum line
-length, and bounded tag count. Malformed lines are discarded. USB removal
-invalidates an active cycle; reconnection requires a stable empty box before a
-new garment can be accepted.
+When the guarded re-zero is applied, `auto_tare` is `true` and
+`tare_residual_g` contains the stable pre-correction residual for production
+diagnostics. The reported `weight_g` already uses the new offset.
+
+The backend enforces the protocol version, known field types, EPC format,
+maximum line length, and bounded tag count. Unknown report and tag fields are
+ignored for additive firmware compatibility; malformed known fields are still
+discarded. USB removal invalidates an active cycle; reconnection requires a
+stable empty box before a new garment can be accepted.
 
 ## Pi service
 

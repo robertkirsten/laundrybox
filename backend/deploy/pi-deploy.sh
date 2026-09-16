@@ -89,6 +89,20 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
         cp "$release/laundrybox/backend/deploy/backend.env" "$CONFIG_FILE"
     fi
 fi
+
+# Carry existing installations from the former conservative timing defaults to
+# the faster production defaults. Values that differ from the old defaults are
+# operator customizations and remain untouched.
+migrate_default_setting() {
+    local key="$1" old_value="$2" new_value="$3"
+    if grep -Fqx "${key}=${old_value}" "$CONFIG_FILE"; then
+        sed -i "s/^${key}=${old_value}$/${key}=${new_value}/" "$CONFIG_FILE"
+    fi
+}
+migrate_default_setting ARGUS_STABILITY_WINDOW_SIZE 6 3
+migrate_default_setting ARGUS_REMOVAL_CONFIRM_SAMPLES 4 3
+migrate_default_setting ARGUS_ACQUISITION_TIMEOUT_S 10.0 6.0
+
 if ! grep -q '^ARGUS_MOCK_DATA_PATH=' "$CONFIG_FILE"; then
     printf '\nARGUS_MOCK_DATA_PATH=/etc/argus/mock_garments.csv\n' >>"$CONFIG_FILE"
 fi

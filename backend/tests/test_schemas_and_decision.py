@@ -38,30 +38,25 @@ def garment_lookup(reference_weight_mg: int | None = 240_000) -> GarmentLookup:
     )
 
 
-def test_teensy_schema_normalizes_epc_and_forbids_unknown_fields() -> None:
+def test_teensy_schema_normalizes_epc_and_ignores_unknown_fields() -> None:
     adapter = TypeAdapter(TeensyMessage)
     report = adapter.validate_python(
         {
             "v": 1,
             "t": 10,
             "raw": 123,
-            "weight_g": 240.0,
-            "tags": [{"epc": EPC.lower(), "rssi": 87}],
+            "weight_g": 0.1,
+            "auto_tare": True,
+            "tare_residual_g": 12.4,
+            "tags": [{"epc": EPC.lower(), "rssi": 87, "future_tag_field": "ignored"}],
+            "future_report_field": "ignored",
         }
     )
     assert report.tags[0].epc == EPC
-
-    with pytest.raises(ValidationError):
-        adapter.validate_python(
-            {
-                "v": 1,
-                "t": 10,
-                "raw": 123,
-                "weight_g": 240.0,
-                "tags": [],
-                "unexpected": True,
-            }
-        )
+    assert report.auto_tare
+    assert report.tare_residual_g == 12.4
+    assert "future_report_field" not in report.model_dump()
+    assert "future_tag_field" not in report.tags[0].model_dump()
 
     with pytest.raises(ValidationError):
         adapter.validate_python(
