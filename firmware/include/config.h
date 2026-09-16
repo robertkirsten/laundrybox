@@ -6,7 +6,7 @@
 
 constexpr unsigned long kHostBaud    = 115200;
 constexpr unsigned long kRfidBaud    = 115200;
-constexpr uint16_t      kRfidTxPower = 2000;   // dBm * 100 = 20.00 dBm
+constexpr uint16_t      kRfidTxPower = 2600;   // dBm * 100 = 20.00 dBm
 
 constexpr uint8_t kLoadcellDoutPin = 2;
 constexpr uint8_t kLoadcellSckPin  = 3;
