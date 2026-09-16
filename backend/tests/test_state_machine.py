@@ -65,6 +65,12 @@ def test_restart_requires_empty_then_persists_pass_cycle(
         assert len(cycle.observations) == 1
         assert cycle.observations[0].read_count == 3
 
+    scan = repository.recent_scan_log(limit=1)[0]
+    assert scan.epc == EPC
+    assert scan.garment_name == "Hose Blau"
+    assert scan.measured_weight_g == 239.967
+    assert scan.reference_weight_g == 240.0
+
     assert machine.on_report(report(0.0), now_monotonic=0.5) is None
     ready_again = machine.on_report(report(0.0), now_monotonic=0.6)
     assert ready_again is not None

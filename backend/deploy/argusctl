@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ENV_FILE=/etc/argus/argus.env
+BACKEND=/opt/argus/venv/bin/argus-backend
+DATABASE=/var/lib/argus/argus.sqlite3
+
+if [[ ! -f "$ENV_FILE" && -f /etc/argus/backend.env ]]; then
+    ENV_FILE=/etc/argus/backend.env
+fi
+
+as_root() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+as_argus() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        runuser -u argus -- "$@"
+    else
+        sudo -u argus "$@"
+    fi
+}
+
+require_install() {
+    [[ -x "$BACKEND" ]] || { echo "ARGUS is not installed under /opt/argus" >&2; exit 1; }
+    [[ -f "$ENV_FILE" ]] || { echo "ARGUS config not found under /etc/argus" >&2; exit 1; }
+}
+
+serial_monitor() {
+    require_install
+    local was_active=0 result=0
+    if systemctl is-active --quiet argus-backend.service; then
+        was_active=1
+        as_root systemctl stop argus-backend.service
+    fi
+    restore_backend() {
+        trap - EXIT INT TERM
+        if [[ "$was_active" -eq 1 ]]; then
+            as_root systemctl start argus-backend.service
+        fi
+    }
+    trap restore_backend EXIT INT TERM
+    as_argus "$BACKEND" --env-file "$ENV_FILE" serial-monitor "$@" || result=$?
+    restore_backend
+    return "$result"
+}
+
+usage() {
+    cat <<'EOF'
+Usage: argusctl COMMAND [OPTIONS]
+
+Commands:
+  status              Service and API status
+  start|stop|restart  Control backend and frontend
+  logs                Follow combined technical logs
+  health              Pretty-print backend health
+  state               Pretty-print current display state
+  scans [options]     Clean EPC / garment / IST / SOLL log
+  serial [options]    Safely stop backend, show raw serial, then restore it
+  db                  Open the production SQLite database read-only
+  backup              Run a verified database backup now
+
+Examples:
+  argusctl scans --follow
+  argusctl scans --last 50 --csv
+  argusctl serial --seconds 15
+EOF
+}
+
+case "${1:-help}" in
+    status)
+        systemctl --no-pager --full status argus-backend.service argus-frontend.service || true
+        echo
+        curl -fsS http://127.0.0.1:8000/api/v1/health | python3 -m json.tool || true
+        ;;
+    start|stop|restart)
+        action="$1"
+        as_root systemctl "$action" argus-backend.service argus-frontend.service
+        ;;
+    logs)
+        as_root journalctl -u argus-backend.service -u argus-frontend.service -f
+        ;;
+    health|state)
+        endpoint="$1"
+        curl -fsS "http://127.0.0.1:8000/api/v1/$endpoint" | python3 -m json.tool
+        ;;
+    scans)
+        shift
+        require_install
+        as_argus "$BACKEND" --env-file "$ENV_FILE" scans "$@"
+        ;;
+    serial)
+        shift
+        serial_monitor "$@"
+        ;;
+    db)
+        command -v sqlite3 >/dev/null 2>&1 || { echo "sqlite3 is not installed" >&2; exit 1; }
+        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+            exec runuser -u argus -- sqlite3 -readonly -header -column "$DATABASE"
+        else
+            exec sudo -u argus sqlite3 -readonly -header -column "$DATABASE"
+        fi
+        ;;
+    backup)
+        as_root systemctl start argus-backup.service
+        as_root journalctl -u argus-backup.service -n 20 --no-pager
+        ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac

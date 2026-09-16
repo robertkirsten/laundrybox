@@ -1,0 +1,905 @@
+diff --git a/README.md b/README.md
+index 10ff909..a941a0f 100644
+--- a/README.md
++++ b/README.md
+@@ -95,3 +95,12 @@ The consolidated product requirements are maintained in
+ 
+ Raspberry Pi startup, operation, serial diagnostics, and troubleshooting are
+ documented in [docs/RASPBERRY_PI_RUNBOOK.md](docs/RASPBERRY_PI_RUNBOOK.md).
++
++For development, run both backend and frontend with:
++
++```sh
++./argus dev
++```
++
++Validate the complete checkout with `./argus check`; install or update a Pi
++with `sudo ./argus install` and `sudo ./argus deploy` respectively.
+diff --git a/backend/.env.example b/backend/.env.example
+index 151370c..de4712b 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -1,5 +1,7 @@
+-ARGUS_DATABASE_URL=sqlite:////var/lib/argus/argus.sqlite3
+-ARGUS_JSON_LOGS=true
++ARGUS_DATABASE_URL=sqlite:///./var/argus.sqlite3
++ARGUS_LOG_LEVEL=INFO
++ARGUS_JSON_LOGS=false
++ARGUS_AUTO_CREATE_SCHEMA=true
+ ARGUS_SERIAL_PORT=/dev/argus-teensy
+ ARGUS_SERIAL_FALLBACK_PORT=/dev/ttyACM0
+ ARGUS_SERIAL_ENABLED=true
+diff --git a/backend/README.md b/backend/README.md
+index 6a3e5b8..0cfc04e 100644
+--- a/backend/README.md
++++ b/backend/README.md
+@@ -6,6 +6,14 @@ and inspection feedback.
+ 
+ ## Development
+ 
++From the parent LaundryBox repository, the preferred command is simply:
++
++```sh
++./argus dev
++```
++
++The manual equivalent is retained below for backend-only work:
++
+ ```sh
+ cd backend
+ python3 -m venv .venv
+diff --git a/backend/deploy/INSTALL_PI.md b/backend/deploy/INSTALL_PI.md
+index 2028f22..3242b81 100644
+--- a/backend/deploy/INSTALL_PI.md
++++ b/backend/deploy/INSTALL_PI.md
+@@ -1,52 +1,28 @@
+ # Raspberry Pi installation
+ 
+-For normal startup, operation, logs, direct Teensy serial access, and recovery
+-after installation, see
+-[`../../docs/RASPBERRY_PI_RUNBOOK.md`](../../docs/RASPBERRY_PI_RUNBOOK.md).
++The Pi needs Python 3.11+, Node.js 22+, `npm`, `rsync`, `curl`, and `sqlite3`.
++The two repositories should normally be sibling checkouts named `laundrybox`
++and `smart-shaft`.
+ 
+-These commands assume both repositories are copied to `/opt/argus`, Node.js 22+
+-and Python 3.11+ are installed, and the kiosk user is separate from the service
+-account.
++Install the complete production stack with one command:
+ 
+ ```sh
+-sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin argus
+-sudo usermod -aG dialout argus
+-sudo install -d -o argus -g argus -m 0750 /var/lib/argus /etc/argus
+-
+-sudo python3 -m venv /opt/argus/venv
+-sudo /opt/argus/venv/bin/pip install /opt/argus/laundrybox/backend
+-cd /opt/argus/smart-shaft
+-sudo npm install
+-sudo npm run build:pi
+-
+-sudo install -o root -g argus -m 0640 /opt/argus/laundrybox/backend/deploy/backend.env /etc/argus/backend.env
+-sudo install -m 0644 /opt/argus/laundrybox/backend/deploy/99-argus-teensy.rules /etc/udev/rules.d/99-argus-teensy.rules
+-sudo install -m 0644 /opt/argus/laundrybox/backend/deploy/argus-backend.service /etc/systemd/system/
+-sudo install -m 0644 /opt/argus/laundrybox/backend/deploy/argus-frontend.service /etc/systemd/system/
+-sudo install -m 0644 /opt/argus/laundrybox/backend/deploy/argus-backup.service /etc/systemd/system/
+-sudo install -m 0644 /opt/argus/laundrybox/backend/deploy/argus-backup.timer /etc/systemd/system/
+-
+-sudo udevadm control --reload-rules
+-sudo udevadm trigger
+-sudo systemctl daemon-reload
+-sudo systemctl enable --now argus-backend.service argus-frontend.service argus-backup.timer
++cd ~/laundrybox
++sudo ./argus install
+ ```
+ 
+-Point Chromium kiosk mode at `http://127.0.0.1:3000`. Confirm the device and
+-services before running a garment:
++The installer creates the `argus` service account, builds a staged release,
++installs the backend/frontend/backup systemd units, configures the Teensy udev
++rule, preserves or migrates SQLite data, enables boot startup, and verifies the
++two HTTP endpoints.
++
++After installation:
+ 
+ ```sh
+-readlink -f /dev/argus-teensy
+-curl -fsS http://127.0.0.1:8000/api/v1/health
+-systemctl --no-pager --full status argus-backend argus-frontend
+-journalctl -u argus-backend -n 100 --no-pager
++argusctl status
++argusctl scans --follow
+ ```
+ 
+-If `/dev/argus-teensy` is absent, inspect `udevadm info --attribute-walk
+---name=/dev/ttyACM0`. The supplied rule matches the normal Teensy USB Serial
+-VID/PID (`16c0:0483`); add the board serial attribute if multiple Teensies are
+-connected.
+-
+-The timer makes verified online SQLite backups in `/var/lib/argus/backups` and
+-retains the latest 14. Test restoration on a stopped service by copying a backup
+-to a separate filename and running `sqlite3 FILE 'PRAGMA integrity_check;'`.
++Open `http://127.0.0.1:3000` in Chromium. See
++[`../../docs/RASPBERRY_PI_RUNBOOK.md`](../../docs/RASPBERRY_PI_RUNBOOK.md) for
++development, updates, serial access, database access, and troubleshooting.
+diff --git a/backend/deploy/argus-backend.service b/backend/deploy/argus-backend.service
+index e4a61a0..9303dcf 100644
+--- a/backend/deploy/argus-backend.service
++++ b/backend/deploy/argus-backend.service
+@@ -8,7 +8,7 @@ User=argus
+ Group=argus
+ SupplementaryGroups=dialout
+ WorkingDirectory=/opt/argus/laundrybox/backend
+-EnvironmentFile=/etc/argus/backend.env
++EnvironmentFile=/etc/argus/argus.env
+ ExecStartPre=/opt/argus/venv/bin/alembic -c /opt/argus/laundrybox/backend/alembic.ini upgrade head
+ ExecStart=/opt/argus/venv/bin/argus-backend serve --host 127.0.0.1 --port 8000
+ Restart=on-failure
+diff --git a/backend/deploy/argus-backup.service b/backend/deploy/argus-backup.service
+index faefe40..a8ee0e5 100644
+--- a/backend/deploy/argus-backup.service
++++ b/backend/deploy/argus-backup.service
+@@ -7,7 +7,7 @@ Type=oneshot
+ User=argus
+ Group=argus
+ WorkingDirectory=/opt/argus/laundrybox/backend
+-EnvironmentFile=/etc/argus/backend.env
++EnvironmentFile=/etc/argus/argus.env
+ ExecStart=/opt/argus/venv/bin/argus-backend backup /var/lib/argus/backups --keep 14
+ StateDirectory=argus
+ UMask=0027
+diff --git a/backend/deploy/backend.env b/backend/deploy/backend.env
+index 4383d27..5b40b08 100644
+--- a/backend/deploy/backend.env
++++ b/backend/deploy/backend.env
+@@ -1,10 +1,12 @@
+ ARGUS_DATABASE_URL=sqlite:////var/lib/argus/argus.sqlite3
++ARGUS_LOG_LEVEL=INFO
+ ARGUS_JSON_LOGS=true
+ ARGUS_AUTO_CREATE_SCHEMA=false
+ ARGUS_SERIAL_PORT=/dev/argus-teensy
+ ARGUS_SERIAL_FALLBACK_PORT=/dev/ttyACM0
+ ARGUS_SERIAL_ENABLED=true
+ ARGUS_SEED_MOCK_DATA=true
++ARGUS_MOCK_DATA_PATH=/etc/argus/mock_garments.csv
+ ARGUS_ENABLE_DEBUG_INGEST=false
+ ARGUS_THRESHOLD_G=3.0
+ ARGUS_EMPTY_WEIGHT_MAX_G=10.0
+diff --git a/backend/src/argus_backend/cli.py b/backend/src/argus_backend/cli.py
+index 8c08b14..f25b5fc 100644
+--- a/backend/src/argus_backend/cli.py
++++ b/backend/src/argus_backend/cli.py
+@@ -1,17 +1,21 @@
+ from __future__ import annotations
+ 
+ import argparse
++import csv
+ import json
++import sys
+ import time
+ import urllib.request
+ from pathlib import Path
++from typing import TextIO
+ 
++import serial
+ import uvicorn
+ 
+ from .backup import backup_database
+ from .config import Settings
+ from .database import create_database_engine, create_schema, create_session_factory
+-from .repository import Repository
++from .repository import Repository, ScanLogEntry
+ 
+ 
+ def seed(settings: Settings) -> None:
+@@ -54,8 +58,102 @@ def replay(path: Path, base_url: str, delay_s: float, hold_s: float) -> None:
+         time.sleep(min(delay_s, 0.25))
+ 
+ 
++def _format_weight(value: float | None) -> str:
++    return "—" if value is None else f"{value:.1f} g"
++
++
++def _scan_values(entry: ScanLogEntry) -> tuple[str, str, str, str]:
++    return (
++        entry.epc or "—",
++        entry.garment_name or ("Unbekannt" if entry.epc else "Nicht erkannt"),
++        _format_weight(entry.measured_weight_g),
++        _format_weight(entry.reference_weight_g),
++    )
++
++
++def _print_scan_table(entries: list[ScanLogEntry], output: TextIO) -> None:
++    rows = [_scan_values(entry) for entry in entries]
++    headers = ("EPC", "GARMENT", "IST", "SOLL")
++    widths = [len(header) for header in headers]
++    for row in rows:
++        for index, value in enumerate(row):
++            widths[index] = max(widths[index], len(value))
++    formatted_headers = "  ".join(
++        header.ljust(widths[index]) for index, header in enumerate(headers)
++    )
++    print(formatted_headers, file=output)
++    for row in rows:
++        print("  ".join(value.ljust(widths[index]) for index, value in enumerate(row)), file=output)
++    output.flush()
++
++
++def scan_log(
++    settings: Settings,
++    *,
++    limit: int,
++    follow: bool,
++    as_csv: bool,
++    poll_interval_s: float = 0.5,
++) -> None:
++    engine = create_database_engine(settings.database_url)
++    try:
++        repository = Repository(create_session_factory(engine), settings)
++        initial = list(reversed(repository.recent_scan_log(limit)))
++        seen = {entry.cycle_id for entry in initial}
++        writer = csv.writer(sys.stdout) if as_csv else None
++        if writer is not None:
++            writer.writerow(("EPC", "GARMENT", "IST", "SOLL"))
++            writer.writerows(_scan_values(entry) for entry in initial)
++            sys.stdout.flush()
++        else:
++            _print_scan_table(initial, sys.stdout)
++
++        while follow:
++            time.sleep(poll_interval_s)
++            new_entries = [
++                entry
++                for entry in reversed(repository.recent_scan_log(100))
++                if entry.cycle_id not in seen
++            ]
++            if not new_entries:
++                continue
++            seen.update(entry.cycle_id for entry in new_entries)
++            if writer is not None:
++                writer.writerows(_scan_values(entry) for entry in new_entries)
++            else:
++                for entry in new_entries:
++                    print("  ".join(_scan_values(entry)))
++            sys.stdout.flush()
++    finally:
++        engine.dispose()
++
++
++def serial_monitor(settings: Settings, *, seconds: float | None, lines: int | None) -> None:
++    path = next((path for path in settings.candidate_serial_ports() if path.exists()), None)
++    if path is None:
++        candidates = ", ".join(str(path) for path in settings.candidate_serial_ports())
++        raise RuntimeError(f"Teensy serial device not found ({candidates})")
++    deadline = time.monotonic() + seconds if seconds is not None else None
++    emitted = 0
++    with serial.Serial(path, settings.serial_baud, timeout=0.5) as device:
++        print(f"Reading {path} at {settings.serial_baud} baud; exit with Ctrl+C.", file=sys.stderr)
++        while deadline is None or time.monotonic() < deadline:
++            raw = device.read_until(b"\n", settings.max_serial_line_bytes + 1)
++            if not raw:
++                continue
++            print(raw.decode(errors="replace").rstrip())
++            emitted += 1
++            if lines is not None and emitted >= lines:
++                break
++
++
+ def build_parser() -> argparse.ArgumentParser:
+     parser = argparse.ArgumentParser(prog="argus-backend")
++    parser.add_argument(
++        "--env-file",
++        type=Path,
++        help="load settings from this env file instead of ./.env",
++    )
+     subparsers = parser.add_subparsers(dest="command", required=True)
+ 
+     serve_parser = subparsers.add_parser("serve", help="run the FastAPI service")
+@@ -79,23 +177,43 @@ def build_parser() -> argparse.ArgumentParser:
+     backup_parser = subparsers.add_parser("backup", help="create a verified SQLite backup")
+     backup_parser.add_argument("destination", type=Path)
+     backup_parser.add_argument("--keep", type=int, default=14)
++
++    scans_parser = subparsers.add_parser(
++        "scans", help="show the clean EPC/garment/actual/reference scan log"
++    )
++    scans_parser.add_argument("--last", type=int, default=20)
++    scans_parser.add_argument("--follow", action="store_true")
++    scans_parser.add_argument("--csv", action="store_true")
++
++    serial_parser = subparsers.add_parser(
++        "serial-monitor", help="print raw Teensy lines; the backend must be stopped first"
++    )
++    serial_parser.add_argument("--seconds", type=float)
++    serial_parser.add_argument("--lines", type=int)
+     return parser
+ 
+ 
+ def main() -> None:
+     args = build_parser().parse_args()
+-    settings = Settings()
+-    if args.command == "serve":
+-        uvicorn.run(
+-            "argus_backend.api:app",
+-            host=args.host,
+-            port=args.port,
+-            reload=args.reload,
+-            log_level=settings.log_level.lower(),
+-        )
+-    elif args.command == "seed":
+-        seed(settings)
+-    elif args.command == "replay":
+-        replay(args.path, args.base_url, args.delay, args.hold)
+-    elif args.command == "backup":
+-        print(backup_database(settings.database_url, args.destination, args.keep))
++    settings = Settings(_env_file=args.env_file) if args.env_file else Settings()
++    try:
++        if args.command == "serve":
++            uvicorn.run(
++                "argus_backend.api:app",
++                host=args.host,
++                port=args.port,
++                reload=args.reload,
++                log_level=settings.log_level.lower(),
++            )
++        elif args.command == "seed":
++            seed(settings)
++        elif args.command == "replay":
++            replay(args.path, args.base_url, args.delay, args.hold)
++        elif args.command == "backup":
++            print(backup_database(settings.database_url, args.destination, args.keep))
++        elif args.command == "scans":
++            scan_log(settings, limit=args.last, follow=args.follow, as_csv=args.csv)
++        elif args.command == "serial-monitor":
++            serial_monitor(settings, seconds=args.seconds, lines=args.lines)
++    except KeyboardInterrupt:
++        raise SystemExit(130) from None
+diff --git a/backend/src/argus_backend/repository.py b/backend/src/argus_backend/repository.py
+index b12b4a4..47e0dc9 100644
+--- a/backend/src/argus_backend/repository.py
++++ b/backend/src/argus_backend/repository.py
+@@ -7,7 +7,7 @@ from pathlib import Path
+ 
+ from pydantic import ValidationError
+ from sqlalchemy import func, select
+-from sqlalchemy.orm import Session, joinedload, sessionmaker
++from sqlalchemy.orm import Session, joinedload, selectinload, sessionmaker
+ 
+ from .config import Settings
+ from .database import session_scope
+@@ -75,6 +75,16 @@ class TagStat:
+     max_rssi: int
+ 
+ 
++@dataclass(frozen=True)
++class ScanLogEntry:
++    cycle_id: str
++    completed_at: datetime
++    epc: str | None
++    garment_name: str | None
++    measured_weight_g: float | None
++    reference_weight_g: float | None
++
++
+ @dataclass(frozen=True)
+ class CycleWrite:
+     cycle_id: str
+@@ -282,6 +292,35 @@ class Repository:
+                 or 0
+             )
+ 
++    def recent_scan_log(self, limit: int = 20) -> tuple[ScanLogEntry, ...]:
++        """Return completed cycles newest first for the operator-facing scan log."""
++        with session_scope(self._factory) as session:
++            cycles = session.scalars(
++                select(ScanCycle)
++                .options(joinedload(ScanCycle.garment), selectinload(ScanCycle.observations))
++                .order_by(ScanCycle.completed_at.desc(), ScanCycle.id.desc())
++                .limit(limit)
++            ).all()
++            return tuple(
++                ScanLogEntry(
++                    cycle_id=cycle.id,
++                    completed_at=cycle.completed_at,
++                    epc=",".join(sorted(item.epc for item in cycle.observations)) or None,
++                    garment_name=cycle.garment.product_name if cycle.garment else None,
++                    measured_weight_g=(
++                        cycle.measured_weight_mg / 1_000
++                        if cycle.measured_weight_mg is not None
++                        else None
++                    ),
++                    reference_weight_g=(
++                        cycle.reference_weight_mg / 1_000
++                        if cycle.reference_weight_mg is not None
++                        else None
++                    ),
++                )
++                for cycle in cycles
++            )
++
+     def persist_cycle(self, context: RuntimeContext, cycle: CycleWrite) -> None:
+         with session_scope(self._factory) as session:
+             session.add(
+diff --git a/backend/src/argus_backend/serial_reader.py b/backend/src/argus_backend/serial_reader.py
+index 4221442..d2a968d 100644
+--- a/backend/src/argus_backend/serial_reader.py
++++ b/backend/src/argus_backend/serial_reader.py
+@@ -64,6 +64,7 @@ class SerialReader:
+                     )
+                     if not raw:
+                         continue
++                    logger.debug("Teensy serial: %s", raw.decode(errors="replace").rstrip())
+                     if len(raw) > self._settings.max_serial_line_bytes:
+                         logger.warning("discarding overlong serial line")
+                         await asyncio.to_thread(device.reset_input_buffer)
+diff --git a/backend/tests/test_state_machine.py b/backend/tests/test_state_machine.py
+index 12c8b56..fd1f8a2 100644
+--- a/backend/tests/test_state_machine.py
++++ b/backend/tests/test_state_machine.py
+@@ -65,6 +65,12 @@ def test_restart_requires_empty_then_persists_pass_cycle(
+         assert len(cycle.observations) == 1
+         assert cycle.observations[0].read_count == 3
+ 
++    scan = repository.recent_scan_log(limit=1)[0]
++    assert scan.epc == EPC
++    assert scan.garment_name == "Hose Blau"
++    assert scan.measured_weight_g == 239.967
++    assert scan.reference_weight_g == 240.0
++
+     assert machine.on_report(report(0.0), now_monotonic=0.5) is None
+     ready_again = machine.on_report(report(0.0), now_monotonic=0.6)
+     assert ready_again is not None
+diff --git a/docs/RASPBERRY_PI_RUNBOOK.md b/docs/RASPBERRY_PI_RUNBOOK.md
+index f0cdea4..b233f5e 100644
+--- a/docs/RASPBERRY_PI_RUNBOOK.md
++++ b/docs/RASPBERRY_PI_RUNBOOK.md
+@@ -1,342 +1,203 @@
+ # Raspberry Pi runbook
+ 
+-This is the day-to-day operating guide for the ARGUS LaundryBox prototype on
+-the Raspberry Pi. It covers the Teensy USB connection, Python/FastAPI backend,
+-local frontend, health checks, logs, and direct serial diagnostics.
++ARGUS has two entry points:
+ 
+-The production installation uses these locations:
++- `./argus` operates from the source checkout for development, validation, and deployment.
++- `argusctl` operates the installed production system.
+ 
+-- backend source: `/opt/argus/laundrybox/backend`
+-- frontend source: `/opt/argus/smart-shaft`
+-- Python environment: `/opt/argus/venv`
+-- backend configuration: `/etc/argus/backend.env`
+-- SQLite database: `/var/lib/argus/argus.sqlite3`
+-- frontend: `http://127.0.0.1:3000`
+-- backend API: `http://127.0.0.1:8000`
+-
+-The installation procedure itself is in
+-[`../backend/deploy/INSTALL_PI.md`](../backend/deploy/INSTALL_PI.md).
+-
+-## Normal startup
+-
+-1. Connect the Teensy to a Raspberry Pi USB port.
+-2. Turn on the Raspberry Pi and log in using Pi Connect or a local terminal.
+-3. Confirm that Linux detected the Teensy:
+-
+-   ```sh
+-   ls -l /dev/argus-teensy /dev/ttyACM0 2>/dev/null
+-   ```
+-
+-   `/dev/argus-teensy` is the preferred stable name. `/dev/ttyACM0` is the
+-   configured fallback and is sufficient for development.
+-
+-4. Start the backend and frontend:
+-
+-   ```sh
+-   sudo systemctl start argus-backend argus-frontend
+-   ```
+-
+-5. Confirm that both services are running:
+-
+-   ```sh
+-   systemctl --no-pager --full status argus-backend argus-frontend
+-   ```
++The commands assume sibling checkouts at `~/laundrybox` and `~/smart-shaft`.
++Set `ARGUS_FRONTEND_DIR=/another/path` when the frontend is elsewhere.
+ 
+-6. Open `http://127.0.0.1:3000` in Chromium on the Pi. The frontend receives
+-   proactive state updates from the backend through SSE; it does not need to
+-   poll the API.
+-
+-The services are enabled during installation and should normally start by
+-themselves after a reboot.
+-
+-## Quick verification
+-
+-Check the backend API:
+-
+-```sh
+-curl -s http://127.0.0.1:8000/api/v1/health | python3 -m json.tool
+-```
+-
+-Inspect the complete current display state:
+-
+-```sh
+-curl -s http://127.0.0.1:8000/api/v1/state | python3 -m json.tool
+-```
+-
+-A fully operational hardware connection should eventually report these health
+-fields as `true`:
+-
+-- `backend_ok`
+-- `database_ok`
+-- `serial_connected`
+-- `serial_fresh`
+-- `rfid_ok`
+-- `scale_ok`
+-
+-Immediately after restarting the backend, `lifecycle: "unavailable"` with
+-`reason: "remove_garment_after_restart"` is expected if a garment was present
+-or the backend cannot yet confirm an empty platform. Remove everything from the
+-scale and allow several fresh Teensy reports to arrive.
+-
+-## Normal garment test
+-
+-1. Start with the weighing platform empty.
+-2. Wait until the frontend/backend reports healthy input.
+-3. Put one tagged garment into the box.
+-4. Keep it still while RFID and weight readings stabilize.
+-5. Confirm that the frontend displays the matching mock garment and its weight
+-   decision.
+-6. If the result requests an inspection, record the result in the frontend
+-   dialog.
+-7. Remove the garment completely before beginning the next cycle.
+-
+-The MVP workflow is deliberately one garment at a time.
+-
+-## Logs and service control
+-
+-Follow backend logs live:
+-
+-```sh
+-sudo journalctl -u argus-backend -f
+-```
+-
+-Follow frontend logs live:
+-
+-```sh
+-sudo journalctl -u argus-frontend -f
+-```
+-
+-Show the latest 100 backend messages without following:
+-
+-```sh
+-sudo journalctl -u argus-backend -n 100 --no-pager
+-```
++## Development
+ 
+-Restart both applications after a configuration or deployed-code change:
++From the LaundryBox checkout, run the whole system with one command:
+ 
+ ```sh
+-sudo systemctl restart argus-backend argus-frontend
++cd ~/laundrybox
++./argus dev
+ ```
+ 
+-Stop both applications:
++On its first run this command creates the Python environment, installs missing
++frontend dependencies, migrates and seeds SQLite, and starts both applications:
+ 
+-```sh
+-sudo systemctl stop argus-backend argus-frontend
+-```
+-
+-The frontend service requests the backend service, so starting the frontend
+-also causes systemd to start the backend. Both are set to restart after a
+-process failure.
++- frontend: `http://127.0.0.1:3000`
++- backend: `http://127.0.0.1:8000`
++- API documentation: `http://127.0.0.1:8000/docs`
+ 
+-## View the Teensy serial output directly
++`Ctrl+C` stops both processes. Development configuration is stored in
++`backend/.env`, and development data is stored in
++`backend/var/argus.sqlite3`.
+ 
+-Only one process can own the serial port. Stop the backend before opening a
+-serial monitor:
++Run all available checks with:
+ 
+ ```sh
+-sudo systemctl stop argus-backend
++./argus check
+ ```
+ 
+-Use the stable device name if it exists:
++This runs Python lint/tests, frontend lint and the Pi production build, plus the
++firmware build when PlatformIO is installed.
+ 
+-```sh
+-/opt/argus/venv/bin/python -m serial.tools.miniterm /dev/argus-teensy 115200
+-```
++## First production installation
+ 
+-Otherwise use the fallback:
++Install from the current two checkouts:
+ 
+ ```sh
+-/opt/argus/venv/bin/python -m serial.tools.miniterm /dev/ttyACM0 115200
++cd ~/laundrybox
++sudo ./argus install
+ ```
+ 
+-The Teensy should emit newline-delimited JSON similar to:
+-
+-```json
+-{"v":1,"t":12345,"raw":8342133,"weight_g":240.0,"tags":[{"epc":"E280...","rssi":210}]}
+-```
++The installer builds both applications before stopping anything, installs
++systemd services, configures the Teensy udev name, enables daily SQLite backups,
++and verifies ports 8000 and 3000. If a development database exists and no
++production database exists yet, it is migrated with SQLite's online backup API.
+ 
+-Exit miniterm with `Ctrl+]`, then return serial ownership to the backend:
++Production locations are intentionally fixed:
+ 
+-```sh
+-sudo systemctl start argus-backend
+-```
++- application releases: `/opt/argus/releases`
++- active application links: `/opt/argus/laundrybox`, `/opt/argus/smart-shaft`
++- configuration: `/etc/argus/argus.env`
++- editable garment fixture: `/etc/argus/mock_garments.csv`
++- database: `/var/lib/argus/argus.sqlite3`
++- verified backups: `/var/lib/argus/backups`
+ 
+-Do not leave miniterm running while restarting the backend.
++Point the Pi's Chromium kiosk at `http://127.0.0.1:3000`.
+ 
+-## USB and serial troubleshooting
++## Production updates
+ 
+-If neither device path exists, check USB detection:
++Update both source checkouts, then deploy them together:
+ 
+ ```sh
+-lsusb
+-dmesg --ctime | tail -n 40
++cd ~/laundrybox
++git pull
++cd ~/smart-shaft
++git pull
++cd ~/laundrybox
++sudo ./argus deploy
+ ```
+ 
+-Reconnect the Teensy and check again. When `/dev/ttyACM0` exists but
+-`/dev/argus-teensy` does not, reload the supplied udev rule:
+-
+-```sh
+-sudo udevadm control --reload-rules
+-sudo udevadm trigger
+-```
++The deployment is staged and built before the running services stop. It backs
++up SQLite, switches the active release, runs migrations through systemd, starts
++both services, and checks backend and frontend HTTP endpoints. A failed startup
++restores the previous active release.
+ 
+-Then unplug and reconnect the Teensy. Check the resolved stable device with:
++## Daily operation
+ 
+ ```sh
+-readlink -f /dev/argus-teensy
++argusctl status
++argusctl start
++argusctl stop
++argusctl restart
++argusctl health
++argusctl state
++argusctl logs
+ ```
+ 
+-If direct serial access reports `Permission denied`, confirm that the current
+-user belongs to `dialout`:
++The services start automatically after a Pi reboot.
+ 
+-```sh
+-groups
+-```
++## Clean garment scan log
+ 
+-Add the user if needed, then log out and back in:
++Show the latest completed scans:
+ 
+ ```sh
+-sudo usermod -aG dialout "$USER"
++argusctl scans
+ ```
+ 
+-If the port reports `Device or resource busy`, find its owner:
++Follow new scans live:
+ 
+ ```sh
+-sudo fuser -v /dev/ttyACM0
++argusctl scans --follow
+ ```
+ 
+-Normally the owner is `argus-backend`; stop that service before using a serial
+-monitor.
+-
+-## Run manually from development checkouts
+-
+-Use this mode while modifying code. Stop the installed services first so ports
+-8000 and 3000 and the Teensy serial port are available:
++Other useful forms are:
+ 
+ ```sh
+-sudo systemctl stop argus-backend argus-frontend
++argusctl scans --last 50
++argusctl scans --last 50 --csv
+ ```
+ 
+-The examples below assume checkouts at `~/laundrybox` and `~/smart-shaft`.
+-Adjust the paths if the repositories are elsewhere.
++The default output intentionally contains only EPC, garment, measured weight
++(`IST`), and reference weight (`SOLL`). Technical logs remain under
++`argusctl logs`.
+ 
+-### Backend
++## Raw Teensy serial
+ 
+-First-time setup:
++Use the safe wrapper rather than opening `/dev/ttyACM0` directly:
+ 
+ ```sh
+-cd ~/laundrybox/backend
+-python3 -m venv .venv
+-. .venv/bin/activate
+-python -m pip install -e '.[dev]'
+-mkdir -p var
+-alembic upgrade head
+-argus-backend seed
++argusctl serial
+ ```
+ 
+-Run it in the foreground:
++Exit with `Ctrl+C`. The command remembers whether the backend was active,
++temporarily stops it so only one process owns the serial port, and restores it
++on exit. For an automatically bounded capture:
+ 
+ ```sh
+-cd ~/laundrybox/backend
+-. .venv/bin/activate
+-argus-backend serve --reload
++argusctl serial --seconds 15
++argusctl serial --lines 30
+ ```
+ 
+-Keep this terminal open. The development defaults use
+-`./var/argus.sqlite3`, `/dev/argus-teensy`, and `/dev/ttyACM0`.
++Set `ARGUS_LOG_LEVEL=DEBUG` in `/etc/argus/argus.env` and restart the backend
++when raw Teensy lines should also appear in the technical journal.
+ 
+-### Frontend development server
++## Database and backup
+ 
+-In a second terminal, perform the first-time dependency installation if
+-necessary, then start Vite:
++Open the production database read-only:
+ 
+ ```sh
+-cd ~/smart-shaft
+-npm install
+-npm run dev
++argusctl db
+ ```
+ 
+-Open the URL printed by Vite, normally `http://127.0.0.1:5173`. The frontend's
+-default API target is `http://127.0.0.1:8000/api/v1`.
+-
+-### Frontend production-style build
+-
+-To exercise the same standalone Node build used by the systemd service:
++Trigger a verified backup immediately:
+ 
+ ```sh
+-cd ~/smart-shaft
+-npm install
+-npm run build:pi
+-HOST=127.0.0.1 PORT=3000 npm run start:pi
++argusctl backup
+ ```
+ 
+-Open `http://127.0.0.1:3000`.
+-
+-Stop foreground development processes with `Ctrl+C`. When finished, restore
+-the installed services:
++The daily timer retains the latest 14 verified backups. Deployments never reset
++or replace the production database.
+ 
+-```sh
+-sudo systemctl start argus-backend argus-frontend
+-```
+-
+-## Test the UI without the Teensy
++## Configuration changes
+ 
+-Stop the production backend, then run the development backend with hardware
+-input disabled and debug ingestion enabled:
++Edit production settings in one place:
+ 
+ ```sh
+-cd ~/laundrybox/backend
+-. .venv/bin/activate
+-ARGUS_SERIAL_ENABLED=false ARGUS_ENABLE_DEBUG_INGEST=true argus-backend serve
++sudo nano /etc/argus/argus.env
++sudo argusctl restart
+ ```
+ 
+-In another terminal, replay the packaged example cycle:
++Current weight stability defaults are six consecutive readings within a total
++2 g range. The 10-second acquisition timeout remains the fallback.
+ 
+-```sh
+-cd ~/laundrybox/backend
+-. .venv/bin/activate
+-argus-backend replay scripts/example-cycle.jsonl --hold 5
+-```
++The garment CSV is copied to `/etc/argus/mock_garments.csv` only on first
++installation, so deployments do not overwrite local garments. New rows are
++seeded when the backend restarts; existing database garments are not
++destructively rewritten by the fixture importer.
+ 
+-Never enable the debug-ingest endpoint on a network-exposed production
+-installation.
++## Common failures
+ 
+-## Database and backup checks
+-
+-The production database is `/var/lib/argus/argus.sqlite3`. Do not edit or copy
+-the live SQLite files manually while the backend is writing to them. Trigger a
+-verified backup using the supplied service:
++If `./argus dev` reports port 3000 or 8000 in use, stop production first:
+ 
+ ```sh
+-sudo systemctl start argus-backup.service
+-sudo journalctl -u argus-backup.service -n 30 --no-pager
++sudo argusctl stop
+ ```
+ 
+-List the backup files:
++If the Teensy is not detected:
+ 
+ ```sh
+-sudo ls -lh /var/lib/argus/backups
++ls -l /dev/argus-teensy /dev/ttyACM0 2>/dev/null
++lsusb
++dmesg --ctime | tail -n 40
+ ```
+ 
+-The installed timer performs a daily backup and retains the newest 14 backups:
++If production does not start:
+ 
+ ```sh
+-systemctl list-timers argus-backup.timer
++argusctl status
++argusctl logs
+ ```
+ 
+-## Complete shutdown or reboot
+-
+-Shut down safely before removing Raspberry Pi power:
++Always shut the Pi down before removing power:
+ 
+ ```sh
+ sudo poweroff
+ ```
+-
+-Reboot the complete Pi application stack:
+-
+-```sh
+-sudo reboot
+-```
+-
+-After a reboot, reconnect through Pi Connect, verify both services, and run the
+-API health check from the beginning of this document.

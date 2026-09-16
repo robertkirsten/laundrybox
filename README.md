@@ -95,3 +95,12 @@ The consolidated product requirements are maintained in
 
 Raspberry Pi startup, operation, serial diagnostics, and troubleshooting are
 documented in [docs/RASPBERRY_PI_RUNBOOK.md](docs/RASPBERRY_PI_RUNBOOK.md).
+
+For development, run both backend and frontend with:
+
+```sh
+./argus dev
+```
+
+Validate the complete checkout with `./argus check`; install or update a Pi
+with `sudo ./argus install` and `sudo ./argus deploy` respectively.

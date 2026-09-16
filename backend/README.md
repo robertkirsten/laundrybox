@@ -6,6 +6,14 @@ and inspection feedback.
 
 ## Development
 
+From the parent LaundryBox repository, the preferred command is simply:
+
+```sh
+./argus dev
+```
+
+The manual equivalent is retained below for backend-only work:
+
 ```sh
 cd backend
 python3 -m venv .venv

@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+
+die() {
+    echo "argus: $*" >&2
+    exit 1
+}
+
+frontend_dir() {
+    if [[ -n "${ARGUS_FRONTEND_DIR:-}" && -f "$ARGUS_FRONTEND_DIR/package.json" ]]; then
+        printf '%s\n' "$ARGUS_FRONTEND_DIR"
+        return
+    fi
+    local candidate
+    for candidate in "$ROOT_DIR/../smart-shaft" "$ROOT_DIR/../smart-shaft.nosync"; do
+        if [[ -f "$candidate/package.json" ]]; then
+            (cd "$candidate" && pwd)
+            return
+        fi
+    done
+    die "frontend not found; set ARGUS_FRONTEND_DIR=/path/to/smart-shaft"
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+port_is_busy() {
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn 2>/dev/null | grep -Eq "[:.]${port}[[:space:]]"
+    elif command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    else
+        return 1
+    fi
+}
+
+prepare_dev() {
+    local frontend="$1"
+    require_command python3
+    require_command npm
+
+    if [[ ! -x "$BACKEND_DIR/.venv/bin/argus-backend" || ! -x "$BACKEND_DIR/.venv/bin/pytest" ]]; then
+        echo "Creating backend environment..."
+        python3 -m venv "$BACKEND_DIR/.venv"
+        "$BACKEND_DIR/.venv/bin/python" -m pip install -e "$BACKEND_DIR[dev]"
+    fi
+    if [[ ! -f "$BACKEND_DIR/.env" ]]; then
+        cp "$BACKEND_DIR/.env.example" "$BACKEND_DIR/.env"
+        echo "Created $BACKEND_DIR/.env"
+    fi
+    if [[ ! -d "$frontend/node_modules" ]]; then
+        echo "Installing frontend dependencies..."
+        (cd "$frontend" && npm install --no-package-lock)
+    fi
+    mkdir -p "$BACKEND_DIR/var"
+    (
+        cd "$BACKEND_DIR"
+        .venv/bin/alembic upgrade head
+        .venv/bin/argus-backend seed
+    )
+}
+
+run_dev() {
+    local frontend backend_pid frontend_pid
+    frontend="$(frontend_dir)"
+    prepare_dev "$frontend"
+
+    port_is_busy 8000 && die "port 8000 is busy; stop the existing backend or run 'sudo argusctl stop'"
+    port_is_busy 3000 && die "port 3000 is busy; stop the existing frontend or run 'sudo argusctl stop'"
+
+    cleanup() {
+        trap - EXIT INT TERM
+        kill "${backend_pid:-}" "${frontend_pid:-}" 2>/dev/null || true
+        wait "${backend_pid:-}" "${frontend_pid:-}" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    echo "Backend: http://127.0.0.1:8000"
+    echo "Frontend: http://127.0.0.1:3000"
+    echo "Stop both with Ctrl+C."
+    (cd "$BACKEND_DIR" && exec .venv/bin/argus-backend serve --reload) &
+    backend_pid=$!
+    (
+        cd "$frontend"
+        exec env VITE_ARGUS_API_BASE=http://127.0.0.1:8000/api/v1 \
+            npm run dev -- --host 127.0.0.1 --port 3000
+    ) &
+    frontend_pid=$!
+    wait -n "$backend_pid" "$frontend_pid"
+    die "a development process stopped unexpectedly"
+}
+
+run_check() {
+    local frontend
+    frontend="$(frontend_dir)"
+    prepare_dev "$frontend"
+    (cd "$BACKEND_DIR" && .venv/bin/ruff check . && .venv/bin/pytest -q)
+    (cd "$frontend" && npm run lint && npm run build:pi)
+    if command -v pio >/dev/null 2>&1; then
+        (cd "$ROOT_DIR/firmware" && pio run)
+    else
+        echo "Skipping firmware build: PlatformIO (pio) is not installed."
+    fi
+}
+
+run_pi_deploy() {
+    local mode="$1" frontend
+    [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run this command with sudo: sudo ./argus $mode"
+    frontend="$(frontend_dir)"
+    exec "$BACKEND_DIR/deploy/pi-deploy.sh" "$mode" "$ROOT_DIR" "$frontend"
+}
+
+usage() {
+    cat <<'EOF'
+Usage: ./argus COMMAND
+
+Commands:
+  dev       Prepare and run backend + frontend; Ctrl+C stops both
+  check     Run backend tests/lint, frontend lint/build, and firmware build if available
+  install   Install the production stack on a Raspberry Pi (run with sudo)
+  deploy    Build and deploy both current checkouts (run with sudo)
+  help      Show this help
+
+Set ARGUS_FRONTEND_DIR if smart-shaft is not beside this repository.
+EOF
+}
+
+case "${1:-help}" in
+    dev) run_dev ;;
+    check) run_check ;;
+    install) run_pi_deploy install ;;
+    deploy) run_pi_deploy deploy ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac

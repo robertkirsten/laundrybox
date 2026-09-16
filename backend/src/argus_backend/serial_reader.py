@@ -64,6 +64,7 @@ class SerialReader:
                     )
                     if not raw:
                         continue
+                    logger.debug("Teensy serial: %s", raw.decode(errors="replace").rstrip())
                     if len(raw) > self._settings.max_serial_line_bytes:
                         logger.warning("discarding overlong serial line")
                         await asyncio.to_thread(device.reset_input_buffer)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload, sessionmaker
+from sqlalchemy.orm import Session, joinedload, selectinload, sessionmaker
 
 from .config import Settings
 from .database import session_scope
@@ -73,6 +73,16 @@ class TagStat:
     last_seen_at: datetime
     read_count: int
     max_rssi: int
+
+
+@dataclass(frozen=True)
+class ScanLogEntry:
+    cycle_id: str
+    completed_at: datetime
+    epc: str | None
+    garment_name: str | None
+    measured_weight_g: float | None
+    reference_weight_g: float | None
 
 
 @dataclass(frozen=True)
@@ -280,6 +290,35 @@ class Repository:
                     select(func.count(ScanCycle.id)).where(ScanCycle.garment_id.is_not(None))
                 )
                 or 0
+            )
+
+    def recent_scan_log(self, limit: int = 20) -> tuple[ScanLogEntry, ...]:
+        """Return completed cycles newest first for the operator-facing scan log."""
+        with session_scope(self._factory) as session:
+            cycles = session.scalars(
+                select(ScanCycle)
+                .options(joinedload(ScanCycle.garment), selectinload(ScanCycle.observations))
+                .order_by(ScanCycle.completed_at.desc(), ScanCycle.id.desc())
+                .limit(limit)
+            ).all()
+            return tuple(
+                ScanLogEntry(
+                    cycle_id=cycle.id,
+                    completed_at=cycle.completed_at,
+                    epc=",".join(sorted(item.epc for item in cycle.observations)) or None,
+                    garment_name=cycle.garment.product_name if cycle.garment else None,
+                    measured_weight_g=(
+                        cycle.measured_weight_mg / 1_000
+                        if cycle.measured_weight_mg is not None
+                        else None
+                    ),
+                    reference_weight_g=(
+                        cycle.reference_weight_mg / 1_000
+                        if cycle.reference_weight_mg is not None
+                        else None
+                    ),
+                )
+                for cycle in cycles
             )
 
     def persist_cycle(self, context: RuntimeContext, cycle: CycleWrite) -> None:
