@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
+  "adafruit-circuitpython-neopixel-spi>=1.0,<2; sys_platform == 'linux' and platform_machine == 'aarch64'",
+  "adafruit-circuitpython-neopixel-spi>=1.0,<2; sys_platform == 'linux' and platform_machine == 'armv7l'",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
   "pyserial>=3.5,<4",

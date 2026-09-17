@@ -37,11 +37,12 @@ if [[ "$MODE" == install ]]; then
     if ! id -u argus >/dev/null 2>&1; then
         useradd --system --gid argus --home-dir /nonexistent --shell /usr/sbin/nologin argus
     fi
-    getent group dialout >/dev/null || die "dialout group does not exist"
-    usermod -aG dialout argus
 else
     id -u argus >/dev/null 2>&1 || die "ARGUS is not installed; run 'sudo ./argus install'"
 fi
+getent group dialout >/dev/null || die "dialout group does not exist"
+getent group spi >/dev/null || die "spi group does not exist"
+usermod -aG dialout,spi argus
 
 install -d -o root -g argus -m 0750 "$INSTALL_ROOT" "$RELEASES_DIR" "$CONFIG_DIR"
 install -d -o argus -g argus -m 0750 "$STATE_DIR" "$STATE_DIR/backups"
@@ -103,8 +104,23 @@ migrate_default_setting ARGUS_STABILITY_WINDOW_SIZE 6 3
 migrate_default_setting ARGUS_REMOVAL_CONFIRM_SAMPLES 4 3
 migrate_default_setting ARGUS_ACQUISITION_TIMEOUT_S 10.0 6.0
 
+# Remove the short-lived analog-strip settings. The actual hardware is a
+# WS2813-compatible addressable strip driven through SPI.
+sed -i '/^ARGUS_RGB_LED_ENABLED=/d' "$CONFIG_FILE"
+sed -i '/^ARGUS_RGB_LED_RED_GPIO=/d' "$CONFIG_FILE"
+sed -i '/^ARGUS_RGB_LED_GREEN_GPIO=/d' "$CONFIG_FILE"
+
 if ! grep -q '^ARGUS_MOCK_DATA_PATH=' "$CONFIG_FILE"; then
     printf '\nARGUS_MOCK_DATA_PATH=/etc/argus/mock_garments.csv\n' >>"$CONFIG_FILE"
+fi
+if ! grep -q '^ARGUS_NEOPIXEL_ENABLED=' "$CONFIG_FILE"; then
+    printf 'ARGUS_NEOPIXEL_ENABLED=true\n' >>"$CONFIG_FILE"
+fi
+if ! grep -q '^ARGUS_NEOPIXEL_COUNT=' "$CONFIG_FILE"; then
+    printf 'ARGUS_NEOPIXEL_COUNT=60\n' >>"$CONFIG_FILE"
+fi
+if ! grep -q '^ARGUS_NEOPIXEL_BRIGHTNESS=' "$CONFIG_FILE"; then
+    printf 'ARGUS_NEOPIXEL_BRIGHTNESS=0.2\n' >>"$CONFIG_FILE"
 fi
 if [[ ! -f "$CONFIG_DIR/mock_garments.csv" ]]; then
     cp "$release/laundrybox/backend/src/argus_backend/fixtures/mock_garments.csv" \

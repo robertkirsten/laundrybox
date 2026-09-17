@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     inspection_timeout_s: float = Field(default=30.0, gt=0)
     monitor_interval_s: float = Field(default=0.25, gt=0)
 
+    neopixel_enabled: bool = False
+    neopixel_count: int = Field(default=60, ge=1, le=1_000)
+    # The 60-pixel prototype is powered from the Pi's 5 V rail. Keep this a
+    # validation limit, not just a default, so configuration cannot create the
+    # strip's full-current load.
+    neopixel_brightness: float = Field(default=0.2, ge=0.0, le=0.2)
+
     station_code: str = "ARGUS-01"
     operator_number: str = "4471"
     algorithm_version: str = "mvp-1"

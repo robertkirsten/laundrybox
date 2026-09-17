@@ -60,6 +60,25 @@ serial_monitor() {
     return "$result"
 }
 
+led_test() {
+    require_install
+    local was_active=0 result=0
+    if systemctl is-active --quiet argus-backend.service; then
+        was_active=1
+        as_root systemctl stop argus-backend.service
+    fi
+    restore_backend() {
+        trap - EXIT INT TERM
+        if [[ "$was_active" -eq 1 ]]; then
+            as_root systemctl start argus-backend.service
+        fi
+    }
+    trap restore_backend EXIT INT TERM
+    as_argus "$BACKEND" --env-file "$ENV_FILE" led-test "$@" || result=$?
+    restore_backend
+    return "$result"
+}
+
 usage() {
     cat <<'EOF'
 Usage: argusctl COMMAND [OPTIONS]
@@ -72,6 +91,7 @@ Commands:
   state               Pretty-print current display state
   scans [options]     Clean EPC / garment / IST / SOLL log
   serial [options]    Safely stop backend, show raw serial, then restore it
+  led-test [options]  Safely stop backend and chase one LED at a time
   db                  Open the production SQLite database read-only
   backup              Run a verified database backup now
 
@@ -79,6 +99,7 @@ Examples:
   argusctl scans --follow
   argusctl scans --last 50 --csv
   argusctl serial --seconds 15
+  argusctl led-test
 EOF
 }
 
@@ -115,6 +136,10 @@ case "${1:-help}" in
     serial)
         shift
         serial_monitor "$@"
+        ;;
+    led-test)
+        shift
+        led_test "$@"
         ;;
     db)
         command -v sqlite3 >/dev/null 2>&1 || { echo "sqlite3 is not installed" >&2; exit 1; }

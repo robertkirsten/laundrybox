@@ -171,6 +171,93 @@ An unanswered CHECK remains available for 30 seconds after garment removal;
 then it is recorded as `nothing_found` and the display returns to ready. Placing
 the next garment before that timeout performs the same automatic completion.
 
+## Addressable status strip
+
+The strip used by ARGUS is a 5 V, individually addressable, dual-data-path RGB
+strip in the WS2813 family (or a pin-compatible equivalent). Its `DI`/`BI` pads
+are inputs, its `DO`/`BO` pads are outputs, and the arrows printed on the strip
+point from the controller end towards the output end. Connect only at the end
+marked `DI` and `BI`.
+
+The backend drives the strip directly from Raspberry Pi SPI. A completed `PASS`
+decision fills it green, a completed `CHECK` decision fills it red, and all
+other states (startup, waiting, acquiring, unavailable, and shutdown) switch it
+off. No Pi-to-Teensy command is involved.
+
+### Wiring
+
+Power down and unplug the Pi before changing connections. This prototype uses
+60 pixels, displays only red or green, and has a hard software brightness limit
+of 20%. Under those constraints the strip is powered from the Pi's 5 V rail;
+never power it from a GPIO or the 3.3 V pin.
+
+| Strip connection | Connect to |
+| --- | --- |
+| `+5V` | Raspberry Pi 5 V, physical pin 2 or 4 |
+| `GND` | Raspberry Pi GND, for example physical pin 6 |
+| `DI` | Raspberry Pi SPI0 MOSI, BCM10/physical pin 19, through 470 ohms |
+| `BI` | GND at the first pixel |
+| `DO`, `BO` | Leave disconnected; these are outputs at the far end |
+
+Keep the MOSI-to-`DI` wire short. The photographed pinout is consistent with
+WS2813B V5, whose specified 2.7 V minimum logic-high level accepts the Pi's
+3.3 V signal without a level shifter. The 470 ohm resistor limits transient
+current and suppresses ringing; it does not materially lower the logic voltage.
+
+SPI0 must be enabled before deploying:
+
+```sh
+sudo raspi-config nonint do_spi 0
+sudo reboot
+ls -l /dev/spidev0.0
+```
+
+The NeoPixel SPI driver uses MOSI to synthesize the 800 kHz pixel waveform, so
+SPI0 cannot simultaneously be used for another peripheral. ARGUS's RFID and
+scale data arrive over the Teensy's USB serial connection and do not conflict.
+
+The deployed configuration matches the one-metre prototype. Brightness values
+above 0.2 are rejected at startup because this build has no separate strip
+supply or fuse.
+
+```sh
+ARGUS_NEOPIXEL_ENABLED=true
+ARGUS_NEOPIXEL_COUNT=60
+ARGUS_NEOPIXEL_BRIGHTNESS=0.2
+sudo argusctl restart
+```
+
+The driver uses GRB byte order and a 300 microsecond reset interval suitable for
+WS2813B. It only emits red, green, or off. If SPI or the LED library cannot
+initialize, the backend logs the error and continues without the strip so the
+inspection UI remains operational.
+
+Test the wiring with:
+
+```sh
+argusctl led-test
+```
+
+The command temporarily stops the backend so only one process owns SPI, lights
+exactly one pixel at a time in a red chase followed by a green chase, clears the
+strip on exit, and then restores the backend. Useful options are
+`--color red`, `--color green`, `--delay 0.2`, and `--cycles 2`.
+
+To invoke the Python test directly from a source checkout, first stop the
+backend so it does not write to SPI concurrently, then use the backend virtual
+environment:
+
+```sh
+sudo systemctl stop argus-backend.service
+cd ~/laundrybox/backend
+.venv/bin/python scripts/led_test.py --env-file .env
+sudo systemctl start argus-backend.service
+```
+
+When the virtual environment is already activated, the middle command is simply
+`python scripts/led_test.py --env-file .env`. The script accepts the same
+`--color`, `--delay`, and `--cycles` options and always clears the strip on exit.
+
 The garment CSV is copied to `/etc/argus/mock_garments.csv` only on first
 installation, so deployments do not overwrite local garments. New rows are
 seeded when the backend restarts; existing database garments are not

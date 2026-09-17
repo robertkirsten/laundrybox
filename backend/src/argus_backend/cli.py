@@ -16,6 +16,7 @@ from .backup import backup_database
 from .config import Settings
 from .database import create_database_engine, create_schema, create_session_factory
 from .repository import Repository, ScanLogEntry
+from .status_led import Color, create_neopixel_strip
 
 
 def seed(settings: Settings) -> None:
@@ -147,6 +148,48 @@ def serial_monitor(settings: Settings, *, seconds: float | None, lines: int | No
                 break
 
 
+def led_test(
+    settings: Settings, *, delay_s: float, cycles: int, color_name: str = "both"
+) -> None:
+    if delay_s <= 0:
+        raise ValueError("delay must be greater than zero")
+    if cycles <= 0:
+        raise ValueError("cycles must be greater than zero")
+    colors: tuple[Color, ...]
+    if color_name == "red":
+        colors = ((255, 0, 0),)
+    elif color_name == "green":
+        colors = ((0, 255, 0),)
+    else:
+        colors = ((255, 0, 0), (0, 255, 0))
+
+    pixels = create_neopixel_strip(settings)
+    off = (0, 0, 0)
+    try:
+        pixels.fill(off)
+        pixels.show()
+        print(
+            f"Testing {settings.neopixel_count} pixels at "
+            f"{settings.neopixel_brightness:.0%} brightness; exit with Ctrl+C.",
+            file=sys.stderr,
+        )
+        for _ in range(cycles):
+            for color in colors:
+                for index in range(settings.neopixel_count):
+                    # Build the complete frame before showing it. At most one
+                    # physical pixel is illuminated at any instant.
+                    pixels.fill(off)
+                    pixels[index] = color
+                    pixels.show()
+                    time.sleep(delay_s)
+    finally:
+        try:
+            pixels.fill(off)
+            pixels.show()
+        finally:
+            pixels.deinit()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="argus-backend")
     parser.add_argument(
@@ -190,6 +233,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serial_parser.add_argument("--seconds", type=float)
     serial_parser.add_argument("--lines", type=int)
+
+    led_parser = subparsers.add_parser(
+        "led-test", help="chase one red/green pixel at a time; the backend must be stopped"
+    )
+    led_parser.add_argument("--delay", type=float, default=0.08)
+    led_parser.add_argument("--cycles", type=int, default=1)
+    led_parser.add_argument("--color", choices=("red", "green", "both"), default="both")
     return parser
 
 
@@ -215,5 +265,7 @@ def main() -> None:
             scan_log(settings, limit=args.last, follow=args.follow, as_csv=args.csv)
         elif args.command == "serial-monitor":
             serial_monitor(settings, seconds=args.seconds, lines=args.lines)
+        elif args.command == "led-test":
+            led_test(settings, delay_s=args.delay, cycles=args.cycles, color_name=args.color)
     except KeyboardInterrupt:
         raise SystemExit(130) from None

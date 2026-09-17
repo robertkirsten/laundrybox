@@ -18,6 +18,7 @@ from .schemas import (
 )
 from .serial_reader import SerialReader
 from .state_machine import CycleStateMachine
+from .status_led import StatusLed, create_status_led
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,10 @@ class StationService:
         self._serial_reader: SerialReader | None = None
         self._debug_connected = False
         self._message_adapter = TypeAdapter(TeensyMessage)
+        self._status_led: StatusLed = create_status_led(settings)
 
     async def start(self) -> None:
+        self._status_led.show(self.broker.current)
         self._tasks.append(asyncio.create_task(self._monitor(), name="argus-monitor"))
         if self.settings.serial_enabled:
             self._serial_reader = SerialReader(
@@ -55,14 +58,15 @@ class StationService:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        self._status_led.close()
 
     async def serial_connected(self) -> None:
         async with self._lock:
-            await self.broker.publish(self.machine.on_serial_connected())
+            await self._publish(self.machine.on_serial_connected())
 
     async def serial_disconnected(self) -> None:
         async with self._lock:
-            await self.broker.publish(self.machine.on_serial_disconnected())
+            await self._publish(self.machine.on_serial_disconnected())
 
     async def handle_message(self, message: TeensyMessage) -> None:
         async with self._lock:
@@ -82,7 +86,7 @@ class StationService:
                 logger.exception("message processing failed; station forced unavailable")
                 snapshot = self.machine.on_database_error()
             if snapshot is not None:
-                await self.broker.publish(snapshot)
+                await self._publish(snapshot)
 
     async def debug_ingest(self, payload: dict[str, object]) -> DisplaySnapshot:
         if not self.settings.enable_debug_ingest:
@@ -102,12 +106,16 @@ class StationService:
                 raise
             except Exception:
                 logger.exception("feedback write failed; station forced unavailable")
-                await self.broker.publish(self.machine.on_database_error())
+                await self._publish(self.machine.on_database_error())
                 raise
             snapshot = self.machine.mark_feedback_recorded(cycle_id, response.category)
             if snapshot is not None:
-                await self.broker.publish(snapshot)
+                await self._publish(snapshot)
             return response
+
+    async def _publish(self, snapshot: DisplaySnapshot) -> None:
+        self._status_led.show(snapshot)
+        await self.broker.publish(snapshot)
 
     async def _monitor(self) -> None:
         try:
@@ -120,6 +128,6 @@ class StationService:
                         logger.exception("cycle monitor failed; station forced unavailable")
                         snapshot = self.machine.on_database_error()
                     if snapshot is not None:
-                        await self.broker.publish(snapshot)
+                        await self._publish(snapshot)
         except asyncio.CancelledError:
             raise
