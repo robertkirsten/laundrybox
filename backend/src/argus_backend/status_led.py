@@ -63,7 +63,8 @@ class NeoPixelStatusLed:
 
         if snapshot.feedback_recorded:
             if self._flash_task is None or self._flash_task.done():
-                flash_color = (0, 255, 0) if snapshot.feedback_category == InspectionCategory.NOTHING_FOUND else (255, 0, 0)
+                nothing_found = snapshot.feedback_category == InspectionCategory.NOTHING_FOUND
+                flash_color = (0, 255, 0) if nothing_found else (255, 0, 0)
                 self._flash_task = asyncio.create_task(self._flash_sequence(flash_color))
             return
         else:

@@ -23,10 +23,65 @@ EPC = "E28011052000773410000001"
 
 
 def report(
-    weight_g: float | None, *, epc: str | None = None, stable: bool | None = None
+    weight_g: float | None,
+    *,
+    epc: str | None = None,
+    stable: bool | None = None,
+    metal: bool | None = None,
 ) -> TeensyReport:
     tags = [] if epc is None else [{"epc": epc, "rssi": 91}]
-    return TeensyReport(v=1, t=0, raw=None, weight_g=weight_g, tags=tags, stable=stable)
+    return TeensyReport(
+        v=1, t=0, raw=None, weight_g=weight_g, tags=tags, stable=stable, metal=metal
+    )
+
+
+def _drive_metal_cycle(machine: CycleStateMachine):
+    """Empty box, then a garment whose weight matches but trips the detector on
+    one report. Metal latches for the whole cycle, so the second report need not
+    repeat it. Returns the finalized snapshot."""
+    machine.on_serial_connected()
+    machine.on_report(report(0.0), now_monotonic=0.0)
+    machine.on_report(report(0.0), now_monotonic=0.1)
+    machine.on_report(report(240.0, epc=EPC, stable=True, metal=True), now_monotonic=0.2)
+    return machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.3)
+
+
+def test_metal_detection_forces_check_and_is_recorded(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    result = _drive_metal_cycle(machine)
+
+    assert result is not None
+    assert result.lifecycle is Lifecycle.CHECK
+    assert result.decision is Decision.CHECK
+    assert result.reason is DecisionReason.METAL_DETECTED
+    assert result.metal_detected is True
+    # Weight itself was within tolerance, so the indicator is the only trigger.
+    assert result.measurement is not None
+    assert result.measurement.difference_g == 0.0
+
+    with session_scope(repository._factory) as session:  # type: ignore[attr-defined]
+        cycle = session.scalar(select(ScanCycle))
+        assert cycle is not None
+        assert cycle.metal_detected is True
+        assert cycle.reason == "metal_detected"
+
+
+def test_metal_detection_can_be_disabled(settings: Settings, repository: Repository) -> None:
+    disabled = settings.model_copy(update={"metal_check_enabled": False})
+    machine = CycleStateMachine(disabled, repository)
+    result = _drive_metal_cycle(machine)
+
+    assert result is not None
+    assert result.decision is Decision.PASS
+    assert result.reason is DecisionReason.WITHIN_THRESHOLD
+    assert result.metal_detected is False
+
+    with session_scope(repository._factory) as session:  # type: ignore[attr-defined]
+        cycle = session.scalar(select(ScanCycle))
+        assert cycle is not None
+        assert cycle.metal_detected is False
 
 
 def test_restart_requires_empty_then_clears_pass_cycle_after_removal(

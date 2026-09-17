@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     serial_stale_after_s: float = Field(default=2.0, gt=0)
     max_serial_line_bytes: int = Field(default=4_096, ge=256, le=1_048_576)
 
+    # When true, ferrous metal reported by the Teensy forces a CHECK and lights
+    # the UI indicator. Kept configurable because magnetic sensing is a
+    # secondary, still-provisional signal (see README): a misbehaving detector
+    # can be disabled here without reflashing firmware.
+    metal_check_enabled: bool = True
+
     threshold_g: float = Field(default=3.0, ge=0)
     empty_weight_max_g: float = Field(default=10.0, ge=0)
     min_garment_weight_g: float = Field(default=50.0, gt=0)

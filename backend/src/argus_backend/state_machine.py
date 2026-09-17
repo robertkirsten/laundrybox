@@ -65,6 +65,7 @@ class ActiveCycle:
     weights_g: deque[float]
     tags: dict[str, MutableTagStat] = field(default_factory=dict)
     calibration_version: str | None = None
+    metal_detected: bool = False
 
 
 class CycleStateMachine:
@@ -357,6 +358,11 @@ class CycleStateMachine:
             return
         cycle.weights_g.append(report.weight_g)
         cycle.calibration_version = report.calibration_version or cycle.calibration_version
+        # Latch metal for the whole cycle: a single detection at any point during
+        # acquisition is enough to flag the garment. Gated so a disabled or
+        # provisional detector has no effect on the decision or the UI.
+        if self.settings.metal_check_enabled and report.metal:
+            cycle.metal_detected = True
         for tag in report.tags:
             stat = cycle.tags.get(tag.epc)
             if stat is None:
@@ -410,6 +416,7 @@ class CycleStateMachine:
                 stable=stable,
                 garment=garment,
                 settings=self.settings,
+                metal=cycle.metal_detected,
             )
             write = CycleWrite(
                 cycle_id=cycle.cycle_id,
@@ -423,6 +430,7 @@ class CycleStateMachine:
                 threshold_mg=round(self.settings.threshold_g * 1_000),
                 decision=result.decision.value,
                 reason=result.reason.value,
+                metal_detected=cycle.metal_detected,
                 protocol_version=1,
                 algorithm_version=self.settings.algorithm_version,
                 calibration_version=cycle.calibration_version,
@@ -480,6 +488,7 @@ class CycleStateMachine:
         difference_mg = None
         decision = None
         cycle_id = self.active_cycle.cycle_id if self.active_cycle else None
+        metal_detected = self.active_cycle.metal_detected if self.active_cycle else False
 
         if self.result is not None:
             decision = self.result.decision
@@ -510,6 +519,7 @@ class CycleStateMachine:
             operator=self.context.operator,
             garment=garment.garment if garment else None,
             measurement=measurement,
+            metal_detected=metal_detected,
             health=self._health(now_monotonic),
             feedback_recorded=self.feedback_category is not None,
             feedback_category=self.feedback_category,

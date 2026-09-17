@@ -98,6 +98,7 @@ class CycleWrite:
     threshold_mg: int
     decision: str
     reason: str
+    metal_detected: bool
     protocol_version: int
     algorithm_version: str
     calibration_version: str | None
@@ -338,6 +339,7 @@ class Repository:
                     threshold_mg=cycle.threshold_mg,
                     decision=cycle.decision,
                     reason=cycle.reason,
+                    metal_detected=cycle.metal_detected,
                     protocol_version=cycle.protocol_version,
                     algorithm_version=cycle.algorithm_version,
                     calibration_version=cycle.calibration_version,

@@ -25,6 +25,7 @@ def evaluate_cycle(
     stable: bool,
     garment: GarmentLookup | None,
     settings: Settings,
+    metal: bool = False,
 ) -> DecisionResult:
     measured_mg = (
         round(measured_weight_g * 1_000)
@@ -78,12 +79,19 @@ def evaluate_cycle(
 
     difference_mg = measured_mg - garment.reference_weight_mg
     threshold_mg = round(settings.threshold_g * 1_000)
-    if abs(difference_mg) <= threshold_mg:
-        decision = Decision.PASS
-        reason = DecisionReason.WITHIN_THRESHOLD
-    else:
+    # CHECK when the weight is off OR ferrous metal was detected. Weight is the
+    # primary signal, so an exceeded difference is reported in preference to the
+    # metal reason when both are true; metal alone turns an otherwise-PASS into a
+    # CHECK.
+    if abs(difference_mg) > threshold_mg:
         decision = Decision.CHECK
         reason = DecisionReason.DIFFERENCE_EXCEEDED
+    elif metal:
+        decision = Decision.CHECK
+        reason = DecisionReason.METAL_DETECTED
+    else:
+        decision = Decision.PASS
+        reason = DecisionReason.WITHIN_THRESHOLD
     return DecisionResult(
         decision,
         reason,

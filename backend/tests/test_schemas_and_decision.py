@@ -105,6 +105,46 @@ def test_threshold_failure_outside_three_grams(weight_g: float) -> None:
     assert result.reason is DecisionReason.DIFFERENCE_EXCEEDED
 
 
+def test_metal_forces_check_even_when_weight_matches() -> None:
+    result = evaluate_cycle(
+        epcs=(EPC,),
+        measured_weight_g=240.0,
+        stable=True,
+        garment=garment_lookup(),
+        settings=Settings(_env_file=None, threshold_g=3.0),
+        metal=True,
+    )
+    assert result.decision is Decision.CHECK
+    assert result.reason is DecisionReason.METAL_DETECTED
+
+
+def test_weight_difference_reason_wins_over_metal() -> None:
+    # Weight is the primary signal: when both trip, the difference is reported.
+    result = evaluate_cycle(
+        epcs=(EPC,),
+        measured_weight_g=250.0,
+        stable=True,
+        garment=garment_lookup(),
+        settings=Settings(_env_file=None, threshold_g=3.0),
+        metal=True,
+    )
+    assert result.decision is Decision.CHECK
+    assert result.reason is DecisionReason.DIFFERENCE_EXCEEDED
+
+
+def test_no_metal_within_threshold_passes() -> None:
+    result = evaluate_cycle(
+        epcs=(EPC,),
+        measured_weight_g=240.0,
+        stable=True,
+        garment=garment_lookup(),
+        settings=Settings(_env_file=None, threshold_g=3.0),
+        metal=False,
+    )
+    assert result.decision is Decision.PASS
+    assert result.reason is DecisionReason.WITHIN_THRESHOLD
+
+
 @pytest.mark.parametrize(
     ("epcs", "garment", "expected"),
     [

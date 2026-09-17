@@ -128,6 +128,7 @@ class ScanCycle(Base):
     threshold_mg: Mapped[int] = mapped_column(Integer)
     decision: Mapped[str] = mapped_column(String(16))
     reason: Mapped[str] = mapped_column(String(64))
+    metal_detected: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     protocol_version: Mapped[int] = mapped_column(Integer, default=1)
     algorithm_version: Mapped[str] = mapped_column(String(64))
     calibration_version: Mapped[str | None] = mapped_column(String(64), nullable=True)

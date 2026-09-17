@@ -107,6 +107,7 @@ class Decision(StrEnum):
 class DecisionReason(StrEnum):
     WITHIN_THRESHOLD = "within_threshold"
     DIFFERENCE_EXCEEDED = "difference_exceeded"
+    METAL_DETECTED = "metal_detected"
     MISSING_TAG = "missing_tag"
     MULTIPLE_TAGS = "multiple_tags"
     UNKNOWN_TAG = "unknown_tag"
@@ -205,6 +206,10 @@ class DisplaySnapshot(BaseModel):
     operator: OperatorSnapshot
     garment: GarmentSnapshot | None = None
     measurement: MeasurementSnapshot | None = None
+    # Ferrous metal seen at any point during the current cycle. A minor,
+    # secondary indicator: weight is the primary detection method, but metal on
+    # its own is enough to force a CHECK (see evaluate_cycle).
+    metal_detected: bool = False
     health: HealthSnapshot
     feedback_recorded: bool = False
     feedback_category: InspectionCategory | None = None

@@ -1,0 +1,17 @@
+# CHECK cycle by metal alone: "Hose Blau" (ref 240g) at a matching weight but
+# with a ferrous object (e.g. a key) tripping the A0 detector. Weight passes;
+# metal forces the CHECK and lights the UI indicator.
+{"v":1,"t":0,"raw":100000,"weight_g":0.2,"metal":false,"tags":[]}
+{"v":1,"t":250,"raw":100001,"weight_g":0.1,"metal":false,"tags":[]}
+{"v":1,"t":500,"raw":100002,"weight_g":0.0,"metal":false,"tags":[]}
+{"v":1,"t":750,"raw":100001,"weight_g":0.1,"metal":false,"tags":[]}
+{"v":1,"t":1000,"raw":340000,"weight_g":239.8,"metal":true,"tags":[{"epc":"E28011052000773410000001","rssi":205}]}
+{"v":1,"t":1250,"raw":340200,"weight_g":240.2,"metal":true,"tags":[{"epc":"E28011052000773410000001","rssi":210}]}
+{"v":1,"t":1500,"raw":340100,"weight_g":239.9,"metal":true,"tags":[{"epc":"E28011052000773410000001","rssi":208}]}
+{"v":1,"t":1750,"raw":340150,"weight_g":240.0,"metal":true,"tags":[{"epc":"E28011052000773410000001","rssi":211}]}
+{"v":1,"t":2000,"raw":340180,"weight_g":240.1,"metal":true,"tags":[{"epc":"E28011052000773410000001","rssi":209}]}
+{"v":1,"t":2250,"raw":340120,"weight_g":239.9,"metal":true,"tags":[{"epc":"E28011052000773410000001","rssi":212}]}
+{"v":1,"t":2500,"raw":100002,"weight_g":0.1,"metal":false,"tags":[]}
+{"v":1,"t":2750,"raw":100001,"weight_g":0.0,"metal":false,"tags":[]}
+{"v":1,"t":3000,"raw":100003,"weight_g":0.2,"metal":false,"tags":[]}
+{"v":1,"t":3250,"raw":100001,"weight_g":0.1,"metal":false,"tags":[]}
