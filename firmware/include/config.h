@@ -24,8 +24,7 @@ constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};//, -1.0f};
 // PLACEHOLDER: these all equal the previous single combined factor, so the scale
 // behaves exactly as it did before until you run the 4-corner calibration in
 // firmware_hx711 and paste the four values it prints here.
-constexpr float kCalibrationFactors[kNumLoadCells] = {
-    205.212280f, 205.212280f, 205.212280f, 205.212280f};
+constexpr float kCalibrationFactors[kNumLoadCells] = {202.455582f, 209.137711f, 197.145020f, 208.115631f};
 static_assert(sizeof(kCalibrationFactors) / sizeof(kCalibrationFactors[0]) == kNumLoadCells,
               "kCalibrationFactors must have exactly kNumLoadCells entries");
 
