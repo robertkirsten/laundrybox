@@ -87,6 +87,7 @@ class CycleStateMachine:
         self.result_removed = False
         self.result_removed_monotonic: float | None = None
         self.feedback_category: InspectionCategory | None = None
+        self.feedback_recorded_monotonic: float | None = None
         self.lifecycle = Lifecycle.UNAVAILABLE
         self.reason = DecisionReason.SERIAL_DISCONNECTED
 
@@ -189,7 +190,12 @@ class CycleStateMachine:
                 return None
 
             if self.feedback_category is not None:
-                if self._observe_empty(weight_g, report.stable):
+                if (
+                    self._observe_empty(weight_g, report.stable)
+                    and self.feedback_recorded_monotonic is not None
+                    and now_monotonic - self.feedback_recorded_monotonic
+                    >= self.settings.feedback_display_s
+                ):
                     self._reset_cycle(require_empty=False)
                     self.lifecycle = Lifecycle.WAITING
                     self.reason = DecisionReason.WAITING_FOR_GARMENT
@@ -282,6 +288,21 @@ class CycleStateMachine:
             self.lifecycle = Lifecycle.WAITING
             self.reason = DecisionReason.WAITING_FOR_GARMENT
             return self._snapshot(now_monotonic=now_monotonic)
+
+        if (
+            cycle is not None
+            and self.result is not None
+            and self.feedback_category is not None
+            and self.result_removed
+            and self.feedback_recorded_monotonic is not None
+            and now_monotonic - self.feedback_recorded_monotonic
+            >= self.settings.feedback_display_s
+        ):
+            self._reset_cycle(require_empty=False)
+            self.lifecycle = Lifecycle.WAITING
+            self.reason = DecisionReason.WAITING_FOR_GARMENT
+            return self._snapshot(now_monotonic=now_monotonic)
+
         return None
 
     def _complete_unanswered_inspection(self) -> None:
@@ -295,15 +316,17 @@ class CycleStateMachine:
         self._reset_cycle(require_empty=False)
 
     def mark_feedback_recorded(
-        self, cycle_id: str, category: InspectionCategory
+        self,
+        cycle_id: str,
+        category: InspectionCategory,
+        now_monotonic: float | None = None,
     ) -> DisplaySnapshot | None:
         if self.active_cycle is None or self.active_cycle.cycle_id != cycle_id:
             return None
         self.feedback_category = category
-        if self.result_removed:
-            self._reset_cycle(require_empty=False)
-            self.lifecycle = Lifecycle.WAITING
-            self.reason = DecisionReason.WAITING_FOR_GARMENT
+        self.feedback_recorded_monotonic = (
+            now_monotonic if now_monotonic is not None else time.monotonic()
+        )
         return self._snapshot()
 
     def on_database_error(self) -> DisplaySnapshot:
@@ -425,6 +448,7 @@ class CycleStateMachine:
         self.result_removed = False
         self.result_removed_monotonic = None
         self.feedback_category = None
+        self.feedback_recorded_monotonic = None
         self.empty_weights.clear()
         self.needs_empty = require_empty
 

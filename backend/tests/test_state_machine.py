@@ -104,10 +104,29 @@ def test_removed_check_result_stays_pending_until_feedback_is_recorded(
 
     assert machine.on_report(report(0.0), now_monotonic=0.4) is None
 
-    completed = machine.mark_feedback_recorded(result.cycle_id, InspectionCategory.KEYS)
+    completed = machine.mark_feedback_recorded(
+        result.cycle_id, InspectionCategory.KEYS, now_monotonic=0.5
+    )
     assert completed is not None
-    assert completed.lifecycle is Lifecycle.WAITING
-    assert completed.cycle_id is None
+    # Feedback was recorded; the LED shows green confirmation while lifecycle
+    # remains CHECK until the display timer expires.
+    assert completed.lifecycle is Lifecycle.CHECK
+    assert completed.feedback_recorded is True
+
+    # Keep serial fresh with empty-box reports during the display period.
+    machine.on_report(report(0.0), now_monotonic=1.0)
+    machine.on_report(report(0.0), now_monotonic=2.0)
+    machine.on_report(report(0.0), now_monotonic=3.0)
+
+    # Before the display timer expires, tick should not transition.
+    assert machine.tick(now_monotonic=3.0) is None
+
+    # After the display timer expires, tick transitions to WAITING.
+    # Serial is still fresh (last report at t=3.0, stale after 2.0s).
+    waiting = machine.tick(now_monotonic=0.5 + settings.feedback_display_s + 0.1)
+    assert waiting is not None
+    assert waiting.lifecycle is Lifecycle.WAITING
+    assert waiting.cycle_id is None
 
 
 def test_new_garment_skips_unanswered_result_as_nothing_found(

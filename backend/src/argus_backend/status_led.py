@@ -59,7 +59,9 @@ class NeoPixelStatusLed:
         if self._failed:
             return
         color = (0, 0, 0)
-        if snapshot.decision is Decision.CHECK:
+        if snapshot.feedback_recorded:
+            color = (0, 255, 0)
+        elif snapshot.decision is Decision.CHECK:
             color = (255, 0, 0)
         elif snapshot.decision is Decision.PASS:
             color = (0, 255, 0)
