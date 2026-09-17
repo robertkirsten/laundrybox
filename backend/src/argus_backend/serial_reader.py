@@ -39,22 +39,33 @@ class SerialReader:
 
     async def run(self) -> None:
         while not self._stop.is_set():
-            path = self._resolve_port()
-            if path is None:
+            paths = self._resolve_ports()
+            if not paths:
                 await self._sleep_or_stop(self._settings.serial_reconnect_s)
                 continue
 
             device: serial.Serial | None = None
             connected = False
+            for path in paths:
+                try:
+                    device = await asyncio.to_thread(
+                        serial.Serial,
+                        str(path),
+                        self._settings.serial_baud,
+                        timeout=self._settings.serial_read_timeout_s,
+                    )
+                    break
+                except (OSError, SerialException) as exc:
+                    logger.debug("Failed to open %s: %s", path, exc)
+                    
+            if device is None:
+                logger.warning("Could not open any Teensy serial port")
+                await self._sleep_or_stop(self._settings.serial_reconnect_s)
+                continue
+
             try:
-                device = await asyncio.to_thread(
-                    serial.Serial,
-                    str(path),
-                    self._settings.serial_baud,
-                    timeout=self._settings.serial_read_timeout_s,
-                )
                 connected = True
-                logger.info("opened Teensy serial port %s", path)
+                logger.info("opened Teensy serial port %s", getattr(device, "name", path))
                 await self._on_connected()
                 pending = bytearray()
                 while not self._stop.is_set():
@@ -95,11 +106,10 @@ class SerialReader:
                     await self._on_disconnected()
             await self._sleep_or_stop(self._settings.serial_reconnect_s)
 
-    def _resolve_port(self) -> Path | None:
-        return next(
-            (path for path in self._settings.candidate_serial_ports() if path.exists()),
-            None,
-        )
+    def _resolve_ports(self) -> list[Path]:
+        return [
+            path for path in self._settings.candidate_serial_ports() if path.exists()
+        ]
 
     async def _sleep_or_stop(self, seconds: float) -> None:
         with suppress(TimeoutError):

@@ -43,7 +43,7 @@ async def test_serial_reader_reassembles_a_line_split_by_timeout(settings, monke
         pass
 
     reader = SerialReader(settings, on_message, on_state_change, on_state_change)
-    monkeypatch.setattr(reader, "_resolve_port", lambda: settings.serial_fallback_port)
+    monkeypatch.setattr(reader, "_resolve_ports", lambda: [settings.serial_fallback_port])
     monkeypatch.setattr(
         "argus_backend.serial_reader.serial.Serial", lambda *_args, **_kwargs: serial
     )
