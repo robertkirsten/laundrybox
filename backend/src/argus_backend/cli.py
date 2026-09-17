@@ -161,8 +161,8 @@ def led_test(
     if cycles <= 0:
         raise ValueError("cycles must be greater than zero")
     if brightness is not None:
-        if not 0.0 <= brightness <= 1.0:
-            raise ValueError("brightness must be between 0.0 and 1.0")
+        if not 0.0 <= brightness <= 0.5:
+            raise ValueError("brightness must be between 0.0 and 0.5")
         settings = settings.model_copy(update={"neopixel_brightness": brightness})
     colors: tuple[Color, ...]
     if color_name == "red":
@@ -247,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     led_parser.add_argument(
         "--brightness",
         type=float,
-        help="brightness from 0.0 to 1.0; defaults to ARGUS_NEOPIXEL_BRIGHTNESS",
+        help="brightness from 0.0 to 0.5; defaults to ARGUS_NEOPIXEL_BRIGHTNESS",
     )
     return parser
 

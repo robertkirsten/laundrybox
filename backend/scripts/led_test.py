@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--brightness",
         type=float,
-        help="brightness from 0.0 to 1.0; defaults to ARGUS_NEOPIXEL_BRIGHTNESS",
+        help="brightness from 0.0 to 0.5; defaults to ARGUS_NEOPIXEL_BRIGHTNESS",
     )
     return parser
 

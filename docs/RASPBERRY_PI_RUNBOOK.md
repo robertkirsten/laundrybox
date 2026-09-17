@@ -195,7 +195,7 @@ off. No Pi-to-Teensy command is involved.
 
 Power down and unplug the Pi before changing connections. This prototype uses
 60 pixels and displays only red or green, never a mixture of RGB channels. The
-brightness is configurable up to 100%. Under those constraints the strip is
+brightness is capped at 50%. Under those constraints the strip is
 powered from the Pi's 5 V rail;
 never power it from a GPIO or the 3.3 V pin.
 
@@ -224,11 +224,10 @@ The NeoPixel SPI driver uses MOSI to synthesize the 800 kHz pixel waveform, so
 SPI0 cannot simultaneously be used for another peripheral. ARGUS's RFID and
 scale data arrive over the Teensy's USB serial connection and do not conflict.
 
-The deployed configuration matches the one-metre prototype and defaults to 50%.
-Brightness is configurable from 0.0 to 1.0. At 100%, 60 WS2813B pixels showing
-one primary color draw approximately 1 A at 5 V. The driver rejects any color
-that would activate multiple RGB channels simultaneously. Reduce brightness if
-the Pi reports undervoltage or the USB-C supply lacks enough headroom.
+The deployed configuration matches the one-metre prototype and defaults to 30%.
+Brightness is configurable from 0.0 to 0.5; larger values are rejected. The
+driver also rejects any color that would activate multiple RGB channels
+simultaneously.
 
 ```sh
 ARGUS_NEOPIXEL_ENABLED=true
@@ -251,7 +250,7 @@ argusctl led-test
 The command temporarily stops the backend so only one process owns SPI, fills
 the entire strip red and then green, clears the strip on exit, and then restores
 the backend. Brightness remains limited by `ARGUS_NEOPIXEL_BRIGHTNESS`. Useful
-options are `--color red`, `--color green`, `--brightness 1.0`, `--delay 5`, and
+options are `--color red`, `--color green`, `--brightness 0.5`, `--delay 5`, and
 `--cycles 2`; `--delay` controls how many seconds each solid color remains
 visible. Without `--brightness`, the command uses `ARGUS_NEOPIXEL_BRIGHTNESS`.
 

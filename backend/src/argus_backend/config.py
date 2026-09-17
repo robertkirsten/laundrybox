@@ -47,9 +47,10 @@ class Settings(BaseSettings):
 
     neopixel_enabled: bool = False
     neopixel_count: int = Field(default=60, ge=1, le=1_000)
-    # Brightness is a unit interval. The LED driver separately enforces that
-    # no emitted color can energize more than one RGB channel at a time.
-    neopixel_brightness: float = Field(default=0.5, ge=0.0, le=1.0)
+    # The prototype is powered from the Pi's 5 V rail, so cap brightness at
+    # 50%. The LED driver separately enforces that no emitted color can
+    # energize more than one RGB channel at a time.
+    neopixel_brightness: float = Field(default=0.3, ge=0.0, le=0.5)
 
     station_code: str = "ARGUS-01"
     operator_number: str = "4471"
