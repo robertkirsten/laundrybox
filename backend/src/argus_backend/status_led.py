@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Protocol
 
 from .config import Settings
-from .schemas import Decision, DisplaySnapshot
+from .schemas import Decision, DisplaySnapshot, InspectionCategory
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +54,25 @@ class NeoPixelStatusLed:
         self._pixels = pixels
         self._failed = False
         self._color: Color | None = None
+        self._flash_task: asyncio.Task[None] | None = None
         self._set((0, 0, 0))
 
     def show(self, snapshot: DisplaySnapshot) -> None:
         if self._failed:
             return
-        color = (0, 0, 0)
+
         if snapshot.feedback_recorded:
-            color = (0, 255, 0)
-        elif snapshot.decision is Decision.CHECK:
+            if self._flash_task is None or self._flash_task.done():
+                flash_color = (0, 255, 0) if snapshot.feedback_category == InspectionCategory.NOTHING_FOUND else (255, 0, 0)
+                self._flash_task = asyncio.create_task(self._flash_sequence(flash_color))
+            return
+        else:
+            if self._flash_task and not self._flash_task.done():
+                self._flash_task.cancel()
+            self._flash_task = None
+
+        color = (0, 0, 0)
+        if snapshot.decision is Decision.CHECK:
             color = (255, 0, 0)
         elif snapshot.decision is Decision.PASS:
             color = (0, 255, 0)
@@ -71,8 +82,25 @@ class NeoPixelStatusLed:
             self._failed = True
             logger.exception("NeoPixel status LED update failed; disabling LED output")
 
-    def close(self) -> None:
+    async def _flash_sequence(self, flash_color: Color) -> None:
         try:
+            for _ in range(3):
+                self._set(flash_color)
+                await asyncio.sleep(0.15)
+                self._set((0, 0, 0))
+                await asyncio.sleep(0.15)
+            self._set(flash_color)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            self._failed = True
+            logger.exception("NeoPixel flash sequence failed")
+
+    def close(self) -> None:
+        if self._flash_task and not self._flash_task.done():
+            self._flash_task.cancel()
+        try:
+            self._color = None
             self._set((0, 0, 0))
         except Exception:
             logger.exception("NeoPixel status LED could not be switched off")
