@@ -8,8 +8,9 @@
 //   {"v":1,"t":12345,"raw":8342133,"weight_g":601.2,"metal":false,
 //    "auto_tare":false,"tare_residual_g":null,
 //    "tags":[{"epc":"E280..","rssi":210}]}
-//   - raw       : summed HX711 counts across all cells (null if any ADC isn't ready)
-//   - weight_g  : grams, only if kCalibrationFactor is set, else null
+//   - raw       : summed raw HX711 counts across all cells, a diagnostic sum
+//                 (cells differ in counts/gram); null if any ADC isn't ready
+//   - weight_g  : grams, only once kCalibrationFactors are set, else null
 //   - metal     : true if the ferrous-metal detector (A0) is above threshold
 //   - auto_tare : true when this report applied a guarded empty-box re-zero
 //   - tare_residual_g: stable residual removed by that re-zero, otherwise null
@@ -44,10 +45,23 @@ uint8_t       gTagCount = 0;
 struct ScaleReading {
     bool  ready = false;
     long  rawSum = 0;
-    long  offsetSum = 0;
     long  cellRaw[kNumLoadCells] = {};
     float weightG = 0.0f;
 };
+
+// Convert a set of per-cell raw readings to grams using each corner's own
+// calibration factor and the cell's current tare offset. Because a rigid plate's
+// reaction forces sum to the applied weight, summing per-cell grams is
+// position-independent once every kCalibrationFactors[i] is correct.
+float computeWeightG(const long cellRaw[kNumLoadCells]) {
+    float grams = 0.0f;
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+        const float taredCounts =
+            (cellRaw[i] - gCells[i].get_offset()) * kLoadcellPolarities[i];
+        grams += taredCounts / kCalibrationFactors[i];
+    }
+    return grams;
+}
 
 bool    gLoadedSinceAutoTare = false;
 uint8_t gAutoTareCandidateCount = 0;
@@ -105,12 +119,11 @@ ScaleReading measureScale(bool weightAllowed) {
             }
             reading.cellRaw[i] = gCells[i].read_average(kWeightSamples);
             reading.rawSum += reading.cellRaw[i] * kLoadcellPolarities[i];
-            reading.offsetSum += gCells[i].get_offset() * kLoadcellPolarities[i];
         }
     }
 
-    if (reading.ready && kCalibrationFactor > 0.0f) {
-        reading.weightG = (reading.rawSum - reading.offsetSum) / kCalibrationFactor;
+    if (reading.ready && kScaleCalibrated) {
+        reading.weightG = computeWeightG(reading.cellRaw);
     }
     return reading;
 }
@@ -137,7 +150,7 @@ void startAutoTareCandidate(const ScaleReading &reading) {
 }
 
 bool maybeAutoTare(ScaleReading &reading, float &residualG) {
-    if (!reading.ready || kCalibrationFactor <= 0.0f) {
+    if (!reading.ready || !kScaleCalibrated) {
         resetAutoTareCandidate();
         return false;
     }
@@ -177,14 +190,12 @@ bool maybeAutoTare(ScaleReading &reading, float &residualG) {
     }
 
     residualG = gAutoTareCandidateWeightSumG / gAutoTareCandidateCount;
-    reading.offsetSum = 0;
     for (uint8_t i = 0; i < kNumLoadCells; i++) {
         const long newOffset =
             static_cast<long>(gAutoTareCandidateRawSums[i] / gAutoTareCandidateCount);
         gCells[i].set_offset(newOffset);
-        reading.offsetSum += newOffset * kLoadcellPolarities[i];
     }
-    reading.weightG = (reading.rawSum - reading.offsetSum) / kCalibrationFactor;
+    reading.weightG = computeWeightG(reading.cellRaw);
 
     gLoadedSinceAutoTare = false;
     resetAutoTareCandidate();
@@ -200,7 +211,7 @@ void emitReport(const ScaleReading &reading, bool autoTared, float tareResidualG
     else       HOST_SERIAL.print("null");
 
     HOST_SERIAL.print(",\"weight_g\":");
-    if (reading.ready && kCalibrationFactor > 0.0f) {
+    if (reading.ready && kScaleCalibrated) {
         HOST_SERIAL.print(reading.weightG, 1);
     } else {
         HOST_SERIAL.print("null");
@@ -265,7 +276,7 @@ void setup() {
         gCells[i].begin(kLoadcellDoutPins[i], kLoadcellSckPins[i]);
     }
 
-    if (kCalibrationFactor > 0.0f) {
+    if (kScaleCalibrated) {
         for (uint8_t i = 0; i < kNumLoadCells; i++) {
             if (gCells[i].wait_ready_timeout(1000)) {
                 gCells[i].tare(kTareSamples);
