@@ -2,13 +2,9 @@
 #include <Arduino.h>
 
 constexpr uint8_t kNumLoadCells        = 4;
-// One HX711 per corner. The 4th cell is assumed to continue the pin pattern;
-// verify DOUT=10 / SCK=11 against the actual wiring before calibrating.
-constexpr uint8_t kLoadcellDoutPins[]  = {2, 4, 6, 8};
-constexpr uint8_t kLoadcellSckPins[]   = {3, 5, 7, 9};
-
-// All four corners read positive under a downward load.
-constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};
+constexpr uint8_t kLoadcellDoutPins[]  = {2, 6, 10, 14};
+constexpr uint8_t kLoadcellSckPins[]   = {3, 7, 11, 15};
+constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};//, -1.0f};
 
 constexpr uint8_t kTareSamples        = 20;
 constexpr uint8_t kCalibrationSamples = 20;

@@ -15,13 +15,9 @@ constexpr unsigned long kRfidStartupDelayMs   = 500; // U107 boot time after UAR
 constexpr unsigned long kRfidWakeDelayMs      = 20;  // RF circuitry startup before polling
 
 constexpr uint8_t kNumLoadCells        = 4;
-// One HX711 per corner. The 4th cell is assumed to continue the pin pattern;
-// verify DOUT=10 / SCK=11 against the actual wiring.
-constexpr uint8_t kLoadcellDoutPins[]  = {2, 4, 6, 8};
-constexpr uint8_t kLoadcellSckPins[]   = {3, 5, 7, 9};
-
-// All four corners read positive under a downward load.
-constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};
+constexpr uint8_t kLoadcellDoutPins[]  = {2, 6, 10, 14};
+constexpr uint8_t kLoadcellSckPins[]   = {3, 7, 11, 15};
+constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};//, -1.0f};
 
 // Per-corner gain calibration: raw counts/gram for each cell, in cell order.
 // Runtime weight = sum_i (cellRaw[i] - offset[i]) * polarity[i] / kCalibrationFactors[i].
