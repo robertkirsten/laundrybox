@@ -62,7 +62,7 @@ constexpr unsigned long kMinCyclePeriodMs   = 250;  // minimum cycle time (floor
 constexpr uint32_t      kAdcReadyMs         = 200;  // max wait for an ADC sample
 
 // Ferrous-metal detector
-constexpr uint8_t kMetalPin            = A0;
+constexpr uint8_t kMetalPin            = A3; // pin 17
 constexpr int     kMetalAdcBits        = 12;    // analogReadResolution -> 0..4095
 constexpr float   kMetalVref           = 3.3f;  // Teensy 4.1 ADC reference (V)
 constexpr float   kMetalThresholdVolts = 0.8f;  // reading above this => metal
