@@ -105,6 +105,7 @@ migrate_default_setting() {
 migrate_default_setting ARGUS_STABILITY_WINDOW_SIZE 6 3
 migrate_default_setting ARGUS_REMOVAL_CONFIRM_SAMPLES 4 3
 migrate_default_setting ARGUS_ACQUISITION_TIMEOUT_S 10.0 6.0
+migrate_default_setting ARGUS_NEOPIXEL_BRIGHTNESS 0.2 0.5
 
 # Remove the short-lived analog-strip settings. The actual hardware is a
 # WS2813-compatible addressable strip driven through SPI.
@@ -122,7 +123,7 @@ if ! grep -q '^ARGUS_NEOPIXEL_COUNT=' "$CONFIG_FILE"; then
     printf 'ARGUS_NEOPIXEL_COUNT=60\n' >>"$CONFIG_FILE"
 fi
 if ! grep -q '^ARGUS_NEOPIXEL_BRIGHTNESS=' "$CONFIG_FILE"; then
-    printf 'ARGUS_NEOPIXEL_BRIGHTNESS=0.2\n' >>"$CONFIG_FILE"
+    printf 'ARGUS_NEOPIXEL_BRIGHTNESS=0.5\n' >>"$CONFIG_FILE"
 fi
 if [[ ! -f "$CONFIG_DIR/mock_garments.csv" ]]; then
     cp "$release/laundrybox/backend/src/argus_backend/fixtures/mock_garments.csv" \

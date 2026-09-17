@@ -3,8 +3,10 @@ from __future__ import annotations
 import sys
 from types import ModuleType
 
+import pytest
+
 from argus_backend.schemas import Decision, Lifecycle
-from argus_backend.status_led import NeoPixelStatusLed, create_status_led
+from argus_backend.status_led import NeoPixelStatusLed, create_status_led, show_solid_color
 
 
 class FakePixels:
@@ -21,6 +23,16 @@ class FakePixels:
 
     def deinit(self) -> None:
         self.deinitialized = True
+
+
+def test_solid_color_rejects_multiple_active_channels() -> None:
+    pixels = FakePixels()
+
+    with pytest.raises(ValueError, match="only one RGB color channel"):
+        show_solid_color(pixels, (255, 255, 0))
+
+    assert pixels.show_count == 0
+    assert pixels.color == (0, 0, 0)
 
 
 def test_status_led_maps_pass_to_green_and_check_to_red(settings, repository) -> None:

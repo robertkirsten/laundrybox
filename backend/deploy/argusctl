@@ -91,7 +91,7 @@ Commands:
   state               Pretty-print current display state
   scans [options]     Clean EPC / garment / IST / SOLL log
   serial [options]    Safely stop backend, show raw serial, then restore it
-  led-test [options]  Safely stop backend and chase one LED at a time
+  led-test [options]  Safely stop backend and fill the LED strip
   db                  Open the production SQLite database read-only
   backup              Run a verified database backup now
 

@@ -16,7 +16,7 @@ from .backup import backup_database
 from .config import Settings
 from .database import create_database_engine, create_schema, create_session_factory
 from .repository import Repository, ScanLogEntry
-from .status_led import Color, create_neopixel_strip
+from .status_led import Color, create_neopixel_strip, show_solid_color
 
 
 def seed(settings: Settings) -> None:
@@ -149,12 +149,21 @@ def serial_monitor(settings: Settings, *, seconds: float | None, lines: int | No
 
 
 def led_test(
-    settings: Settings, *, delay_s: float, cycles: int, color_name: str = "both"
+    settings: Settings,
+    *,
+    delay_s: float,
+    cycles: int,
+    color_name: str = "both",
+    brightness: float | None = None,
 ) -> None:
     if delay_s <= 0:
         raise ValueError("delay must be greater than zero")
     if cycles <= 0:
         raise ValueError("cycles must be greater than zero")
+    if brightness is not None:
+        if not 0.0 <= brightness <= 1.0:
+            raise ValueError("brightness must be between 0.0 and 1.0")
+        settings = settings.model_copy(update={"neopixel_brightness": brightness})
     colors: tuple[Color, ...]
     if color_name == "red":
         colors = ((255, 0, 0),)
@@ -166,8 +175,7 @@ def led_test(
     pixels = create_neopixel_strip(settings)
     off = (0, 0, 0)
     try:
-        pixels.fill(off)
-        pixels.show()
+        show_solid_color(pixels, off)
         print(
             f"Testing {settings.neopixel_count} pixels at "
             f"{settings.neopixel_brightness:.0%} brightness; exit with Ctrl+C.",
@@ -175,17 +183,11 @@ def led_test(
         )
         for _ in range(cycles):
             for color in colors:
-                for index in range(settings.neopixel_count):
-                    # Build the complete frame before showing it. At most one
-                    # physical pixel is illuminated at any instant.
-                    pixels.fill(off)
-                    pixels[index] = color
-                    pixels.show()
-                    time.sleep(delay_s)
+                show_solid_color(pixels, color)
+                time.sleep(delay_s)
     finally:
         try:
-            pixels.fill(off)
-            pixels.show()
+            show_solid_color(pixels, off)
         finally:
             pixels.deinit()
 
@@ -235,11 +237,18 @@ def build_parser() -> argparse.ArgumentParser:
     serial_parser.add_argument("--lines", type=int)
 
     led_parser = subparsers.add_parser(
-        "led-test", help="chase one red/green pixel at a time; the backend must be stopped"
+        "led-test", help="fill the strip red/green; the backend must be stopped"
     )
-    led_parser.add_argument("--delay", type=float, default=0.08)
+    led_parser.add_argument(
+        "--delay", type=float, default=2.0, help="seconds to display each solid color"
+    )
     led_parser.add_argument("--cycles", type=int, default=1)
     led_parser.add_argument("--color", choices=("red", "green", "both"), default="both")
+    led_parser.add_argument(
+        "--brightness",
+        type=float,
+        help="brightness from 0.0 to 1.0; defaults to ARGUS_NEOPIXEL_BRIGHTNESS",
+    )
     return parser
 
 
@@ -266,6 +275,12 @@ def main() -> None:
         elif args.command == "serial-monitor":
             serial_monitor(settings, seconds=args.seconds, lines=args.lines)
         elif args.command == "led-test":
-            led_test(settings, delay_s=args.delay, cycles=args.cycles, color_name=args.color)
+            led_test(
+                settings,
+                delay_s=args.delay,
+                cycles=args.cycles,
+                color_name=args.color,
+                brightness=args.brightness,
+            )
     except KeyboardInterrupt:
         raise SystemExit(130) from None

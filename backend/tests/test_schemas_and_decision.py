@@ -69,7 +69,7 @@ def test_teensy_schema_normalizes_epc_and_ignores_unknown_fields() -> None:
     [
         {"serial_baud": 0},
         {"removal_confirm_samples": 1},
-        {"neopixel_brightness": 0.21},
+        {"neopixel_brightness": 1.01},
         {"empty_weight_max_g": 50.0, "min_garment_weight_g": 50.0},
         {"min_garment_weight_g": 1000.0, "max_garment_weight_g": 1000.0},
     ],

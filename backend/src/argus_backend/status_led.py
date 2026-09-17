@@ -28,6 +28,16 @@ class StatusLed(Protocol):
     def close(self) -> None: ...
 
 
+def show_solid_color(pixels: PixelStrip, color: Color) -> None:
+    """Write a solid frame while preventing multi-channel RGB output."""
+    if any(not isinstance(component, int) or not 0 <= component <= 255 for component in color):
+        raise ValueError("RGB components must be integers between 0 and 255")
+    if sum(component != 0 for component in color) > 1:
+        raise ValueError("only one RGB color channel may be active at a time")
+    pixels.fill(color)
+    pixels.show()
+
+
 class DisabledStatusLed:
     def show(self, snapshot: DisplaySnapshot) -> None:
         return None
@@ -72,8 +82,7 @@ class NeoPixelStatusLed:
     def _set(self, color: Color) -> None:
         if color == self._color:
             return
-        self._pixels.fill(color)
-        self._pixels.show()
+        show_solid_color(self._pixels, color)
         self._color = color
 
 

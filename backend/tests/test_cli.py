@@ -54,7 +54,7 @@ class RecordingPixels:
         self.deinitialized = True
 
 
-def test_led_test_never_lights_more_than_one_pixel(monkeypatch) -> None:
+def test_led_test_fills_strip_with_each_color(monkeypatch) -> None:
     settings = Settings(
         _env_file=None,
         neopixel_enabled=True,
@@ -68,8 +68,9 @@ def test_led_test_never_lights_more_than_one_pixel(monkeypatch) -> None:
 
     led_test(settings, delay_s=0.01, cycles=1)
 
-    assert len(sleeps) == settings.neopixel_count * 2
-    assert all(sum(color != (0, 0, 0) for color in frame) <= 1 for frame in pixels.frames)
+    assert sleeps == [0.01, 0.01]
     assert pixels.frames[0] == ((0, 0, 0),) * settings.neopixel_count
+    assert pixels.frames[1] == ((255, 0, 0),) * settings.neopixel_count
+    assert pixels.frames[2] == ((0, 255, 0),) * settings.neopixel_count
     assert pixels.frames[-1] == ((0, 0, 0),) * settings.neopixel_count
     assert pixels.deinitialized
