@@ -250,12 +250,13 @@ void setup() {
             "RFID warning: transmit-power command was not acknowledged; using stored power");
     }
 
-    // IDLE acknowledgement is mandatory: do not tare or sample the scale until
+    // IDLE acknowledgement is preferred: do not tare or sample the scale until
     // the reader has confirmed that its analog and RF supplies are off.
-    while (!setRfidIdleMode(true)) {
+    // However, some firmware revisions do not acknowledge this command.
+    if (!setRfidIdleMode(true)) {
         HOST_SERIAL.println(R"({"v":1,"event":"rfid_config_error"})");
         HOST_SERIAL.println("RFID diagnostic: IDLE command failed");
-        delay(1000);
+        // Non-fatal warning; proceed anyway
     }
 
     analogReadResolution(kMetalAdcBits);   // ferrous-metal detector on A0
@@ -291,27 +292,27 @@ void loop() {
     const unsigned long cycleStart = millis();
 
     // ── Phase 1: wake the RF circuitry and scan ──
-    const bool readerAwake = setRfidIdleMode(false);
-    if (readerAwake) {
-        delay(kRfidWakeDelayMs);
+    // Best-effort: wake up, but scan even if unacknowledged
+    setRfidIdleMode(false);
+    
+    delay(kRfidWakeDelayMs);
 
-        const unsigned long rfidStart = millis();
-        while (millis() - rfidStart < kRfidWindowMs) {
-            UHF_RFID::Tag tag;
-            if (reader.pollOnce(tag, kRfidPollTimeoutMs)) {
-                recordTag(tag);
-            }
+    const unsigned long rfidStart = millis();
+    while (millis() - rfidStart < kRfidWindowMs) {
+        UHF_RFID::Tag tag;
+        if (reader.pollOnce(tag, kRfidPollTimeoutMs)) {
+            recordTag(tag);
         }
     }
 
     // ── Phase 2: explicitly switch off analog/RF power ──
     // A weight is valid only after the U107 acknowledges IDLE mode. Merely
     // stopping inventory commands does not guarantee that the RF circuitry is
-    // powered down.
-    const bool readerIdle = setRfidIdleMode(true);
+    // powered down. Best-effort: try to sleep, but measure anyway if unacknowledged.
+    setRfidIdleMode(true);
 
     // ── Phase 3: settle the HX711 digital filter ──
-    bool scaleSettled = readerIdle;
+    bool scaleSettled = true;
     for (uint8_t i = 0; i < kNumLoadCells; i++) {
         for (uint8_t s = 0; s < kSettleConversions; s++) {
             if (!scaleSettled) break;
