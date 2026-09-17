@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useArgusState } from "@/hooks/use-argus-state";
 import {
   postInspection,
+  registerNewGarment,
   type DisplaySnapshot,
   type GarmentSnapshot,
   type InspectionCategory,
@@ -15,7 +16,8 @@ export const Route = createFileRoute("/")({
       { title: "Nordwäsche Check-Station" },
       {
         name: "description",
-        content: "Schachtanzeige und Hosentaschen-Kontrolle für die industrielle Wäsche.",
+        content:
+          "Schachtanzeige und Hosentaschen-Kontrolle für die industrielle Wäsche.",
       },
     ],
   }),
@@ -65,7 +67,9 @@ function TopBar({ snapshot }: { snapshot: DisplaySnapshot | null }) {
   const now = useClock();
   return (
     <div className="flex items-center justify-between border-b border-line px-6 py-2.5 font-mono text-xs tabular-nums text-steel">
-      <span className="text-sm text-ink">{snapshot?.scanned_count ?? 0} gescannte Teile</span>
+      <span className="text-sm text-ink">
+        {snapshot?.scanned_count ?? 0} gescannte Teile
+      </span>
       <span>
         {snapshot
           ? `${snapshot.operator.display_name} · #${snapshot.operator.number}`
@@ -121,7 +125,9 @@ function StatusScreen({
         <p className="font-mono text-sm uppercase tracking-[0.25em] text-steel">
           {snapshot?.station.name ?? "ARGUS Check-Station"}
         </p>
-        <h1 className="mt-4 font-display text-7xl font-bold uppercase tracking-tight">{title}</h1>
+        <h1 className="mt-4 font-display text-7xl font-bold uppercase tracking-tight">
+          {title}
+        </h1>
         <p className="mt-5 max-w-2xl font-mono text-lg text-steel">{detail}</p>
       </div>
     </Frame>
@@ -153,11 +159,36 @@ function CheckStation() {
   const [screen, setScreen] = useState<InspectionScreen>("result");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [productName, setProductName] = useState("");
+  const [wearerName, setWearerName] = useState("");
 
   useEffect(() => {
     setSubmitError(null);
+    setProductName("");
+    setWearerName("");
     setScreen(snapshot?.lifecycle === "check" ? "check" : "result");
   }, [snapshot?.cycle_id, snapshot?.lifecycle]);
+
+  const submitRegistration = async (action: "register" | "dismiss") => {
+    if (!snapshot?.cycle_id || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      // The resulting PASS/CHECK snapshot arrives over SSE.
+      await registerNewGarment(snapshot.cycle_id, action, {
+        productName,
+        wearerName,
+      });
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Kleidungsstück konnte nicht gespeichert werden",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const submitFeedback = async (category: InspectionCategory) => {
     if (!snapshot?.cycle_id || submitting) return;
@@ -168,7 +199,9 @@ function CheckStation() {
       setScreen("result");
     } catch (error) {
       setSubmitError(
-        error instanceof Error ? error.message : "Rückmeldung konnte nicht gespeichert werden",
+        error instanceof Error
+          ? error.message
+          : "Rückmeldung konnte nicht gespeichert werden",
       );
     } finally {
       setSubmitting(false);
@@ -198,11 +231,18 @@ function CheckStation() {
 
   if (snapshot === null) {
     return (
-      <StatusScreen snapshot={null} title="Nicht bereit" detail="Kein Systemstatus verfügbar." />
+      <StatusScreen
+        snapshot={null}
+        title="Nicht bereit"
+        detail="Kein Systemstatus verfügbar."
+      />
     );
   }
 
-  if (snapshot.lifecycle === "unavailable" || snapshot.lifecycle === "starting") {
+  if (
+    snapshot.lifecycle === "unavailable" ||
+    snapshot.lifecycle === "starting"
+  ) {
     return (
       <StatusScreen
         snapshot={snapshot}
@@ -230,6 +270,92 @@ function CheckStation() {
         title="Messung läuft"
         detail="Gewicht und RFID werden stabil erfasst …"
       />
+    );
+  }
+
+  if (snapshot.lifecycle === "new_garment") {
+    return (
+      <Frame status="neutral" snapshot={snapshot}>
+        <div className="flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8 text-center">
+          <div>
+            <p className="font-mono text-sm uppercase tracking-[0.25em] text-steel">
+              Unbekanntes RFID-Tag
+            </p>
+            <h1 className="mt-3 font-display text-6xl font-bold uppercase tracking-tight">
+              Neues Kleidungsstück
+            </h1>
+            <p className="mt-3 font-mono text-lg text-steel">
+              Mit dem gemessenen Gewicht als Referenz aufnehmen?
+            </p>
+          </div>
+          <div className="flex items-baseline gap-3">
+            <span className="font-display text-7xl font-bold tabular-nums">
+              {formatWeight(snapshot.measurement?.measured_g ?? null)}
+            </span>
+            <span className="font-mono text-2xl text-steel">g</span>
+          </div>
+          <div className="w-full max-w-md space-y-4 text-left">
+            <label className="block">
+              <span className="font-mono text-sm uppercase tracking-wider text-steel">
+                Bezeichnung (optional)
+              </span>
+              <input
+                value={productName}
+                onChange={(event) => setProductName(event.target.value)}
+                placeholder="Neues Kleidungsstück"
+                maxLength={160}
+                className="mt-1 w-full rounded-xl border-2 border-line bg-paper px-4 py-3 font-body text-xl text-ink outline-none focus:border-steel"
+              />
+            </label>
+            <label className="block">
+              <span className="font-mono text-sm uppercase tracking-wider text-steel">
+                Träger (optional)
+              </span>
+              <input
+                value={wearerName}
+                onChange={(event) => setWearerName(event.target.value)}
+                placeholder="Nicht zugeordnet"
+                maxLength={160}
+                className="mt-1 w-full rounded-xl border-2 border-line bg-paper px-4 py-3 font-body text-xl text-ink outline-none focus:border-steel"
+              />
+            </label>
+            {snapshot.pending_epc && (
+              <p className="break-all font-mono text-xs text-steel">
+                EPC {snapshot.pending_epc}
+              </p>
+            )}
+          </div>
+          <div className="grid w-full max-w-md grid-cols-1 gap-5 sm:grid-cols-2">
+            <button
+              disabled={submitting || !snapshot.cycle_id}
+              onClick={() => void submitRegistration("register")}
+              className="flex min-h-28 flex-col items-center justify-center gap-1 rounded-2xl bg-ok/15 ring-2 ring-ok/50 transition-transform active:scale-[0.98] disabled:opacity-50"
+            >
+              <span className="font-display text-2xl font-semibold uppercase tracking-wide">
+                Hinzufügen
+              </span>
+              <span className="font-mono text-sm text-ok">
+                → Referenz speichern
+              </span>
+            </button>
+            <button
+              disabled={submitting || !snapshot.cycle_id}
+              onClick={() => void submitRegistration("dismiss")}
+              className="flex min-h-28 flex-col items-center justify-center gap-1 rounded-2xl bg-paper ring-2 ring-black/10 transition-transform active:scale-[0.98] disabled:opacity-50"
+            >
+              <span className="font-display text-2xl font-semibold uppercase tracking-wide">
+                Verwerfen
+              </span>
+              <span className="font-mono text-sm text-steel">
+                → Zur Prüfung
+              </span>
+            </button>
+          </div>
+          {submitError && (
+            <p className="font-mono text-sm text-err">{submitError}</p>
+          )}
+        </div>
+      </Frame>
     );
   }
 
@@ -273,7 +399,9 @@ function CheckStation() {
               <span className="font-display text-3xl font-semibold uppercase tracking-wide">
                 Nichts gefunden
               </span>
-              <span className="font-mono text-sm text-ok">→ Rückmeldung speichern</span>
+              <span className="font-mono text-sm text-ok">
+                → Rückmeldung speichern
+              </span>
             </button>
             <button
               disabled={submitting || !snapshot.cycle_id}
@@ -283,10 +411,14 @@ function CheckStation() {
               <span className="font-display text-3xl font-semibold uppercase tracking-wide">
                 Etwas gefunden
               </span>
-              <span className="font-mono text-sm text-err">→ Gegenstand wählen</span>
+              <span className="font-mono text-sm text-err">
+                → Gegenstand wählen
+              </span>
             </button>
           </div>
-          {submitError && <p className="font-mono text-sm text-err">{submitError}</p>}
+          {submitError && (
+            <p className="font-mono text-sm text-err">{submitError}</p>
+          )}
         </div>
       </Frame>
     );
@@ -316,19 +448,27 @@ function CheckStation() {
                 <span className="grid size-20 place-items-center rounded-xl bg-panel text-4xl ring-1 ring-black/5">
                   {item.icon}
                 </span>
-                <span className="font-body text-xl font-semibold">{item.label}</span>
+                <span className="font-body text-xl font-semibold">
+                  {item.label}
+                </span>
               </button>
             ))}
           </div>
           {submitError && (
-            <p className="mt-5 text-center font-mono text-sm text-err">{submitError}</p>
+            <p className="mt-5 text-center font-mono text-sm text-err">
+              {submitError}
+            </p>
           )}
         </div>
       </Frame>
     );
   }
 
-  if (snapshot.lifecycle !== "pass" || garment === null || snapshot.measurement === null) {
+  if (
+    snapshot.lifecycle !== "pass" ||
+    garment === null ||
+    snapshot.measurement === null
+  ) {
     return (
       <StatusScreen
         snapshot={snapshot}
@@ -347,7 +487,9 @@ function CheckStation() {
         className="grid flex-1 grid-cols-1 gap-px bg-line text-left md:grid-cols-2"
       >
         <div className="flex flex-col items-center justify-center bg-panel p-8">
-          <p className="font-mono text-sm uppercase tracking-[0.3em] text-steel">Schacht</p>
+          <p className="font-mono text-sm uppercase tracking-[0.3em] text-steel">
+            Schacht
+          </p>
           <p className="font-display text-[220px] font-bold leading-none tracking-tighter tabular-nums">
             {garment.chute_number}
           </p>
@@ -361,7 +503,9 @@ function CheckStation() {
                 key={String(label)}
                 className="flex items-baseline justify-between border-b border-line pb-2 last:border-0"
               >
-                <span className="font-mono text-sm uppercase text-steel">{label}</span>
+                <span className="font-mono text-sm uppercase text-steel">
+                  {label}
+                </span>
                 <span
                   className={cn(
                     "font-mono text-2xl tabular-nums",
@@ -383,8 +527,16 @@ function CheckStation() {
           </p>
           <dl className="mt-10 space-y-4">
             {[
-              { label: "Kunde", main: garment.customer_name, sub: garment.customer_number },
-              { label: "Träger", main: garment.wearer_name, sub: garment.wearer_number },
+              {
+                label: "Kunde",
+                main: garment.customer_name,
+                sub: garment.customer_number,
+              },
+              {
+                label: "Träger",
+                main: garment.wearer_name,
+                sub: garment.wearer_number,
+              },
               { label: "Artikelnummer", value: garment.article_number },
               { label: "ID-Nummer", value: garment.id_number },
               {
@@ -400,7 +552,9 @@ function CheckStation() {
                   {item.label}
                 </dt>
                 {"value" in item ? (
-                  <dd className="font-mono text-2xl tabular-nums">{item.value}</dd>
+                  <dd className="font-mono text-2xl tabular-nums">
+                    {item.value}
+                  </dd>
                 ) : (
                   <dd className="text-right">
                     <span className="font-display text-2xl font-normal tracking-tight">

@@ -4,6 +4,7 @@ import csv
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -47,6 +48,10 @@ class CycleNotFound(RepositoryError):
 
 
 class FeedbackConflict(RepositoryError):
+    pass
+
+
+class GarmentAlreadyExists(RepositoryError):
     pass
 
 
@@ -106,6 +111,10 @@ class CycleWrite:
 
 
 class Repository:
+    # Shared customer for garments registered live at the station, which have no
+    # real customer assigned yet.
+    _AUTO_CUSTOMER_NUMBER = "AUTO"
+
     def __init__(self, factory: sessionmaker[Session], settings: Settings) -> None:
         self._factory = factory
         self._settings = settings
@@ -279,6 +288,92 @@ class Repository:
                     customer_number=garment.customer.customer_number,
                     wearer_name=garment.wearer.display_name,
                     wearer_number=garment.wearer.wearer_number,
+                    manufacture_year=garment.manufacture_year,
+                    manufacture_week=garment.manufacture_week,
+                ),
+            )
+
+    def register_garment(
+        self,
+        *,
+        epc: str,
+        weight_mg: int,
+        product_name: str | None,
+        wearer_name: str | None,
+        calibration_version: str | None,
+    ) -> GarmentLookup:
+        """Create a garment and its first active reference from a live capture.
+
+        Only the EPC and measured weight are known for certain; the operator may
+        supply a product and wearer name. Every other required field is filled
+        with an auto-capture placeholder so the record satisfies the schema and
+        is unmistakably operator-created rather than mistaken for master data.
+        """
+        with session_scope(self._factory) as session:
+            if session.scalar(select(Garment.id).where(Garment.epc == epc)) is not None:
+                raise GarmentAlreadyExists(epc)
+
+            customer = session.scalar(
+                select(Customer).where(Customer.customer_number == self._AUTO_CUSTOMER_NUMBER)
+            )
+            if customer is None:
+                customer = Customer(
+                    customer_number=self._AUTO_CUSTOMER_NUMBER,
+                    name="Nicht zugeordnet",
+                )
+                session.add(customer)
+                session.flush()
+
+            token = uuid4().hex[:10].upper()
+            wearer = Wearer(
+                wearer_number=f"AUTO-{token}",
+                display_name=wearer_name or "Nicht zugeordnet",
+                customer_id=customer.id,
+            )
+            session.add(wearer)
+            session.flush()
+
+            now = utc_now()
+            garment = Garment(
+                epc=epc,
+                chute_number=0,
+                id_number=f"AUTO-{token}",
+                article_number="AUTO",
+                product_name=product_name or "Neues Kleidungsstück",
+                size="—",
+                manufacture_year=now.year,
+                manufacture_week=now.isocalendar().week,
+                customer_id=customer.id,
+                wearer_id=wearer.id,
+            )
+            session.add(garment)
+            session.flush()
+
+            reference = GarmentReference(
+                garment_id=garment.id,
+                weight_mg=weight_mg,
+                recorded_at=now,
+                source="operator_capture",
+                calibration_version=calibration_version,
+            )
+            session.add(reference)
+            session.flush()
+
+            return GarmentLookup(
+                garment_id=garment.id,
+                reference_id=reference.id,
+                reference_weight_mg=reference.weight_mg,
+                garment=GarmentSnapshot(
+                    epc=garment.epc,
+                    chute_number=garment.chute_number,
+                    id_number=garment.id_number,
+                    article_number=garment.article_number,
+                    product_name=garment.product_name,
+                    size=garment.size,
+                    customer_name=customer.name,
+                    customer_number=customer.customer_number,
+                    wearer_name=wearer.display_name,
+                    wearer_number=wearer.wearer_number,
                     manufacture_year=garment.manufacture_year,
                     manufacture_week=garment.manufacture_week,
                 ),

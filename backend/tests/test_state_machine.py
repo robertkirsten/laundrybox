@@ -351,3 +351,140 @@ def test_database_failure_forces_unavailable_and_never_passes(
     assert still_failed is not None
     assert still_failed.reason is DecisionReason.DATABASE_ERROR
     assert still_failed.decision is None
+
+
+UNKNOWN_EPC = "AABB00112233445566778899"
+
+
+def _drive_to_new_garment_prompt(
+    machine: CycleStateMachine, *, weight_g: float = 240.0, epc: str = UNKNOWN_EPC
+):
+    """Empty box, then a single stable but unknown tag. Returns the prompt
+    snapshot (lifecycle NEW_GARMENT)."""
+    machine.on_serial_connected()
+    machine.on_report(report(0.0), now_monotonic=0.0)
+    machine.on_report(report(0.0), now_monotonic=0.1)
+    machine.on_report(report(weight_g, epc=epc, stable=True), now_monotonic=0.2)
+    return machine.on_report(report(weight_g, epc=epc, stable=True), now_monotonic=0.3)
+
+
+def test_unknown_tag_opens_new_garment_prompt_without_persisting(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    snap = _drive_to_new_garment_prompt(machine)
+
+    assert snap is not None
+    assert snap.lifecycle is Lifecycle.NEW_GARMENT
+    assert snap.reason is DecisionReason.NEW_GARMENT_DETECTED
+    assert snap.decision is None
+    assert snap.pending_epc == UNKNOWN_EPC
+    assert snap.measurement is not None
+    assert snap.measurement.measured_g == 240.0
+    # Fail-closed: nothing is recorded until the operator answers.
+    with session_scope(repository._factory) as session:  # type: ignore[attr-defined]
+        assert session.scalar(select(ScanCycle)) is None
+
+
+def test_register_new_garment_captures_reference_and_passes(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    _drive_to_new_garment_prompt(machine)
+    assert machine.active_cycle is not None
+    cycle_id = machine.active_cycle.cycle_id
+
+    snap = machine.register_new_garment(cycle_id, product_name="Kittel", wearer_name="A. Schmidt")
+
+    assert snap is not None
+    assert snap.lifecycle is Lifecycle.PASS
+    assert snap.decision is Decision.PASS
+    assert snap.reason is DecisionReason.WITHIN_THRESHOLD
+    assert snap.pending_epc is None
+    assert snap.garment is not None
+    assert snap.garment.product_name == "Kittel"
+    assert snap.garment.wearer_name == "A. Schmidt"
+    assert snap.measurement is not None
+    assert snap.measurement.reference_g == 240.0
+    assert snap.measurement.difference_g == 0.0
+    assert machine.scanned_count == 1
+
+    lookup = repository.garment_by_epc(UNKNOWN_EPC)
+    assert lookup is not None
+    assert lookup.reference_weight_mg == 240_000
+    with session_scope(repository._factory) as session:  # type: ignore[attr-defined]
+        cycle = session.scalar(select(ScanCycle))
+        assert cycle is not None
+        assert cycle.garment_id is not None
+        assert cycle.decision == "PASS"
+
+
+def test_register_blank_names_use_placeholders(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    _drive_to_new_garment_prompt(machine)
+    assert machine.active_cycle is not None
+    cycle_id = machine.active_cycle.cycle_id
+
+    snap = machine.register_new_garment(cycle_id, product_name=None, wearer_name=None)
+
+    assert snap is not None
+    assert snap.garment is not None
+    assert snap.garment.product_name == "Neues Kleidungsstück"
+    assert snap.garment.wearer_name == "Nicht zugeordnet"
+    assert snap.garment.customer_number == "AUTO"
+
+
+def test_dismiss_new_garment_records_check(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    _drive_to_new_garment_prompt(machine)
+    assert machine.active_cycle is not None
+    cycle_id = machine.active_cycle.cycle_id
+
+    snap = machine.dismiss_new_garment(cycle_id)
+
+    assert snap is not None
+    assert snap.lifecycle is Lifecycle.CHECK
+    assert snap.decision is Decision.CHECK
+    assert snap.reason is DecisionReason.UNKNOWN_TAG
+    assert machine.scanned_count == 0
+    assert repository.garment_by_epc(UNKNOWN_EPC) is None
+    with session_scope(repository._factory) as session:  # type: ignore[attr-defined]
+        cycle = session.scalar(select(ScanCycle))
+        assert cycle is not None
+        assert cycle.garment_id is None
+        assert cycle.reason == "unknown_tag"
+
+
+def test_new_garment_prompt_times_out_to_check(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    _drive_to_new_garment_prompt(machine)  # prompt entered at now_monotonic=0.3
+    # Garment stays on the plate (serial link fresh) but the operator never answers.
+    assert machine.on_report(report(240.0, epc=UNKNOWN_EPC, stable=True), now_monotonic=2.2) is None
+    assert machine.lifecycle is Lifecycle.NEW_GARMENT
+
+    snap = machine.tick(now_monotonic=0.3 + settings.inspection_timeout_s + 0.1)
+
+    assert snap is not None
+    assert snap.lifecycle is Lifecycle.CHECK
+    assert snap.reason is DecisionReason.UNKNOWN_TAG
+    assert repository.garment_by_epc(UNKNOWN_EPC) is None
+
+
+def test_new_garment_prompt_removed_records_check(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    _drive_to_new_garment_prompt(machine)
+
+    snap = machine.on_report(report(0.0), now_monotonic=0.4)
+
+    assert snap is not None
+    assert snap.lifecycle is Lifecycle.CHECK
+    assert snap.reason is DecisionReason.UNKNOWN_TAG
+    assert machine.scanned_count == 0

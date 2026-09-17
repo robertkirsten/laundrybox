@@ -7,9 +7,10 @@ from pydantic import TypeAdapter
 
 from .config import Settings
 from .events import SnapshotBroker
-from .repository import CycleNotFound, FeedbackConflict, Repository
+from .repository import CycleNotFound, FeedbackConflict, GarmentAlreadyExists, Repository
 from .schemas import (
     DisplaySnapshot,
+    GarmentRegistrationRequest,
     InspectionRequest,
     InspectionResponse,
     TeensyEvent,
@@ -112,6 +113,30 @@ class StationService:
             if snapshot is not None:
                 await self._publish(snapshot)
             return response
+
+    async def resolve_new_garment(
+        self, cycle_id: str, request: GarmentRegistrationRequest
+    ) -> DisplaySnapshot:
+        async with self._lock:
+            try:
+                if request.action == "register":
+                    snapshot = self.machine.register_new_garment(
+                        cycle_id,
+                        product_name=request.product_name,
+                        wearer_name=request.wearer_name,
+                    )
+                else:
+                    snapshot = self.machine.dismiss_new_garment(cycle_id)
+            except GarmentAlreadyExists:
+                raise
+            except Exception:
+                logger.exception("garment registration failed; station forced unavailable")
+                await self._publish(self.machine.on_database_error())
+                raise
+            if snapshot is None:
+                raise CycleNotFound(cycle_id)
+            await self._publish(snapshot)
+            return snapshot
 
     async def _publish(self, snapshot: DisplaySnapshot) -> None:
         self._status_led.show(snapshot)

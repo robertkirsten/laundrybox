@@ -94,6 +94,7 @@ class Lifecycle(StrEnum):
     STARTING = "starting"
     WAITING = "waiting"
     ACQUIRING = "acquiring"
+    NEW_GARMENT = "new_garment"
     PASS = "pass"
     CHECK = "check"
     UNAVAILABLE = "unavailable"
@@ -111,6 +112,7 @@ class DecisionReason(StrEnum):
     MISSING_TAG = "missing_tag"
     MULTIPLE_TAGS = "multiple_tags"
     UNKNOWN_TAG = "unknown_tag"
+    NEW_GARMENT_DETECTED = "new_garment_detected"
     MISSING_REFERENCE = "missing_reference"
     MISSING_WEIGHT = "missing_weight"
     UNSTABLE_WEIGHT = "unstable_weight"
@@ -210,6 +212,9 @@ class DisplaySnapshot(BaseModel):
     # secondary indicator: weight is the primary detection method, but metal on
     # its own is enough to force a CHECK (see evaluate_cycle).
     metal_detected: bool = False
+    # EPC awaiting operator registration while the lifecycle is NEW_GARMENT.
+    # None in every other state; the measured clean weight is in `measurement`.
+    pending_epc: str | None = None
     health: HealthSnapshot
     feedback_recorded: bool = False
     feedback_category: InspectionCategory | None = None
@@ -224,6 +229,29 @@ class InspectionRequest(BaseModel):
 
     category: InspectionCategory
     note: str | None = Field(default=None, max_length=500)
+
+
+class GarmentRegistrationRequest(BaseModel):
+    """Operator answer to the NEW_GARMENT prompt.
+
+    ``action="dismiss"`` records the unknown garment as a CHECK; ``"register"``
+    captures it with the measured weight as its clean reference. Blank names
+    collapse to ``None`` so the repository can substitute placeholders.
+    """
+
+    model_config = StrictInputModelConfig
+
+    action: Literal["register", "dismiss"]
+    product_name: str | None = Field(default=None, max_length=160)
+    wearer_name: str | None = Field(default=None, max_length=160)
+
+    @field_validator("product_name", "wearer_name")
+    @classmethod
+    def blank_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class InspectionResponse(BaseModel):

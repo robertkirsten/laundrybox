@@ -10,18 +10,24 @@ die() {
 }
 
 frontend_dir() {
-    if [[ -n "${ARGUS_FRONTEND_DIR:-}" && -f "$ARGUS_FRONTEND_DIR/package.json" ]]; then
-        printf '%s\n' "$ARGUS_FRONTEND_DIR"
+    if [[ -n "${ARGUS_FRONTEND_DIR:-}" ]]; then
+        [[ -f "$ARGUS_FRONTEND_DIR/package.json" ]] \
+            || die "ARGUS_FRONTEND_DIR has no package.json: $ARGUS_FRONTEND_DIR"
+        (cd "$ARGUS_FRONTEND_DIR" && pwd)
         return
     fi
+    # The frontend now lives in this repository (frontend/); the former sibling
+    # smart-shaft checkout is kept only as a fallback for older layouts.
     local candidate
-    for candidate in "$ROOT_DIR/../smart-shaft" "$ROOT_DIR/../smart-shaft.nosync"; do
-        if [[ -f "$candidate/package.json" ]]; then
+    for candidate in "$ROOT_DIR/frontend" "$ROOT_DIR/../smart-shaft" "$ROOT_DIR/../smart-shaft.nosync"; do
+        if [[ -d "$candidate/src" ]]; then
+            [[ -f "$candidate/package.json" ]] || die \
+"frontend at $candidate is missing its build scaffolding (package.json, vite.config.ts, tsconfig.json, …); add the project files before running dev/deploy"
             (cd "$candidate" && pwd)
             return
         fi
     done
-    die "frontend not found; set ARGUS_FRONTEND_DIR=/path/to/smart-shaft"
+    die "frontend not found; expected $ROOT_DIR/frontend or set ARGUS_FRONTEND_DIR"
 }
 
 require_command() {

@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { fetchState, openStateEvents, type DisplaySnapshot } from "@/lib/argus-api";
+import {
+  fetchState,
+  openStateEvents,
+  type DisplaySnapshot,
+} from "@/lib/argus-api";
 
 export type BackendConnection = "connecting" | "connected" | "disconnected";
 
@@ -21,7 +25,10 @@ export function useArgusState() {
     void fetchState(abort.signal)
       .then(accept)
       .catch((error: unknown) => {
-        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+        if (
+          active &&
+          !(error instanceof DOMException && error.name === "AbortError")
+        ) {
           setConnection("disconnected");
         }
       });

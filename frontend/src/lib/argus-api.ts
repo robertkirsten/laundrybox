@@ -1,4 +1,11 @@
-export type Lifecycle = "starting" | "waiting" | "acquiring" | "pass" | "check" | "unavailable";
+export type Lifecycle =
+  | "starting"
+  | "waiting"
+  | "acquiring"
+  | "new_garment"
+  | "pass"
+  | "check"
+  | "unavailable";
 
 export type InspectionCategory =
   | "nothing_found"
@@ -47,6 +54,8 @@ export interface DisplaySnapshot {
   operator: { number: string; display_name: string };
   garment: GarmentSnapshot | null;
   measurement: MeasurementSnapshot | null;
+  // EPC awaiting operator registration while lifecycle === "new_garment".
+  pending_epc: string | null;
   health: {
     backend_ok: boolean;
     database_ok: boolean;
@@ -66,10 +75,9 @@ export interface InspectionResponse {
   duplicate: boolean;
 }
 
-const API_BASE = (import.meta.env.VITE_ARGUS_API_BASE ?? "http://127.0.0.1:8000/api/v1").replace(
-  /\/$/,
-  "",
-);
+const API_BASE = (
+  import.meta.env.VITE_ARGUS_API_BASE ?? "http://127.0.0.1:8000/api/v1"
+).replace(/\/$/, "");
 
 async function responseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -85,7 +93,9 @@ async function responseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchState(signal?: AbortSignal): Promise<DisplaySnapshot> {
+export async function fetchState(
+  signal?: AbortSignal,
+): Promise<DisplaySnapshot> {
   return responseJson<DisplaySnapshot>(
     await fetch(`${API_BASE}/state`, { signal, cache: "no-store" }),
   );
@@ -97,7 +107,9 @@ export function openStateEvents(
 ): EventSource {
   const events = new EventSource(`${API_BASE}/events`);
   events.addEventListener("state", (event) => {
-    onState(JSON.parse((event as MessageEvent<string>).data) as DisplaySnapshot);
+    onState(
+      JSON.parse((event as MessageEvent<string>).data) as DisplaySnapshot,
+    );
   });
   events.onopen = () => onConnectionChange(true);
   events.onerror = () => onConnectionChange(false);
@@ -109,10 +121,40 @@ export async function postInspection(
   category: InspectionCategory,
 ): Promise<InspectionResponse> {
   return responseJson<InspectionResponse>(
-    await fetch(`${API_BASE}/cycles/${encodeURIComponent(cycleId)}/inspection`, {
+    await fetch(
+      `${API_BASE}/cycles/${encodeURIComponent(cycleId)}/inspection`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category }),
+      },
+    ),
+  );
+}
+
+export interface GarmentRegistration {
+  productName?: string;
+  wearerName?: string;
+}
+
+export async function registerNewGarment(
+  cycleId: string,
+  action: "register" | "dismiss",
+  details: GarmentRegistration = {},
+): Promise<DisplaySnapshot> {
+  const body =
+    action === "register"
+      ? {
+          action,
+          product_name: details.productName?.trim() || null,
+          wearer_name: details.wearerName?.trim() || null,
+        }
+      : { action };
+  return responseJson<DisplaySnapshot>(
+    await fetch(`${API_BASE}/cycles/${encodeURIComponent(cycleId)}/garment`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category }),
+      body: JSON.stringify(body),
     }),
   );
 }

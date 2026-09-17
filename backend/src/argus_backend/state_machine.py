@@ -12,6 +12,7 @@ from .config import Settings
 from .decision import DecisionResult, evaluate_cycle
 from .repository import (
     CycleWrite,
+    GarmentAlreadyExists,
     GarmentLookup,
     Repository,
     RuntimeContext,
@@ -89,6 +90,12 @@ class CycleStateMachine:
         self.result_removed_monotonic: float | None = None
         self.feedback_category: InspectionCategory | None = None
         self.feedback_recorded_monotonic: float | None = None
+        # Set while the lifecycle is NEW_GARMENT: an unknown but otherwise valid
+        # garment is held (not yet persisted) awaiting the operator's decision to
+        # register it or dismiss the prompt.
+        self.pending_epc: str | None = None
+        self.pending_measured_weight_g: float | None = None
+        self.pending_since_monotonic: float | None = None
         self.lifecycle = Lifecycle.UNAVAILABLE
         self.reason = DecisionReason.SERIAL_DISCONNECTED
 
@@ -178,6 +185,14 @@ class CycleStateMachine:
             self.reason = DecisionReason.REMOVE_GARMENT_AFTER_RESTART
             return self._snapshot()
 
+        if self.pending_epc is not None:
+            # A new-garment prompt is on screen. Removing the garment without an
+            # answer records it as a CHECK (fail-closed); otherwise keep waiting
+            # for the operator, and let tick() enforce the registration timeout.
+            if abs(weight_g) <= self.settings.empty_weight_max_g:
+                return self._resolve_pending_as_check(completed_at=observed_at)
+            return None
+
         if self.result is not None:
             # A PASS needs no operator inspection. Once the garment has been
             # removed and the empty box is confirmed, immediately return the
@@ -250,7 +265,12 @@ class CycleStateMachine:
         )
 
         if stable and (tag_count > 1 or one_tag_ready):
-            return self._finalize(measured_weight_g, stable=True, completed_at=observed_at)
+            return self._finalize(
+                measured_weight_g,
+                stable=True,
+                completed_at=observed_at,
+                now_monotonic=now_monotonic,
+            )
         return self._snapshot(measured_weight_g=measured_weight_g, stable=stable)
 
     def tick(self, now_monotonic: float | None = None) -> DisplaySnapshot | None:
@@ -267,14 +287,27 @@ class CycleStateMachine:
             self.reason = DecisionReason.SERIAL_STALE
             return self._snapshot(now_monotonic=now_monotonic)
 
+        if (
+            self.pending_epc is not None
+            and self.pending_since_monotonic is not None
+            and now_monotonic - self.pending_since_monotonic >= self.settings.inspection_timeout_s
+        ):
+            return self._resolve_pending_as_check(completed_at=utc_now())
+
         cycle = self.active_cycle
         if (
             cycle is not None
             and self.result is None
+            and self.pending_epc is None
             and now_monotonic - cycle.started_monotonic >= self.settings.acquisition_timeout_s
         ):
             stable, measured_weight_g = self._stable_weight(None)
-            return self._finalize(measured_weight_g, stable=stable, completed_at=utc_now())
+            return self._finalize(
+                measured_weight_g,
+                stable=stable,
+                completed_at=utc_now(),
+                now_monotonic=now_monotonic,
+            )
 
         if (
             cycle is not None
@@ -401,7 +434,12 @@ class CycleStateMachine:
         )
 
     def _finalize(
-        self, measured_weight_g: float | None, *, stable: bool, completed_at: datetime
+        self,
+        measured_weight_g: float | None,
+        *,
+        stable: bool,
+        completed_at: datetime,
+        now_monotonic: float,
     ) -> DisplaySnapshot:
         cycle = self.active_cycle
         if cycle is None:
@@ -410,14 +448,33 @@ class CycleStateMachine:
         try:
             epcs = self._decision_epcs()
             garment = self.repository.garment_by_epc(epcs[0]) if len(epcs) == 1 else None
-            result = evaluate_cycle(
-                epcs=epcs,
-                measured_weight_g=measured_weight_g,
-                stable=stable,
-                garment=garment,
-                settings=self.settings,
-                metal=cycle.metal_detected,
-            )
+        except Exception:
+            logger.exception("database lookup failed while finalizing measurement cycle")
+            return self.on_database_error()
+
+        result = evaluate_cycle(
+            epcs=epcs,
+            measured_weight_g=measured_weight_g,
+            stable=stable,
+            garment=garment,
+            settings=self.settings,
+            metal=cycle.metal_detected,
+        )
+        # A single, stable, in-range but unknown tag is a candidate for on-station
+        # registration: hold it on a prompt instead of recording a CHECK now. Any
+        # non-answer (dismiss, removal, or timeout) still falls back to CHECK, so
+        # the fail-closed guarantee is preserved.
+        if result.reason is DecisionReason.UNKNOWN_TAG:
+            return self._enter_new_garment_prompt(measured_weight_g, now_monotonic)
+        return self._commit_result(result, stable=stable, completed_at=completed_at)
+
+    def _commit_result(
+        self, result: DecisionResult, *, stable: bool, completed_at: datetime
+    ) -> DisplaySnapshot:
+        cycle = self.active_cycle
+        if cycle is None:
+            raise RuntimeError("cannot commit a result without an active cycle")
+        try:
             write = CycleWrite(
                 cycle_id=cycle.cycle_id,
                 started_at=cycle.started_at,
@@ -449,6 +506,83 @@ class CycleStateMachine:
         self.reason = result.reason
         return self._snapshot(stable=stable)
 
+    def _enter_new_garment_prompt(
+        self, measured_weight_g: float | None, now_monotonic: float
+    ) -> DisplaySnapshot:
+        cycle = self.active_cycle
+        if cycle is None:
+            raise RuntimeError("cannot prompt without an active cycle")
+        self.pending_epc = self._decision_epcs()[0]
+        self.pending_measured_weight_g = measured_weight_g
+        self.pending_since_monotonic = now_monotonic
+        self.lifecycle = Lifecycle.NEW_GARMENT
+        self.reason = DecisionReason.NEW_GARMENT_DETECTED
+        return self._snapshot(measured_weight_g=measured_weight_g, stable=True)
+
+    def _resolve_pending_as_check(self, *, completed_at: datetime) -> DisplaySnapshot:
+        cycle = self.active_cycle
+        if cycle is None or self.pending_epc is None:
+            raise RuntimeError("no pending garment to resolve")
+        epc = self.pending_epc
+        measured = self.pending_measured_weight_g
+        self._clear_pending()
+        result = evaluate_cycle(
+            epcs=(epc,),
+            measured_weight_g=measured,
+            stable=True,
+            garment=None,
+            settings=self.settings,
+            metal=cycle.metal_detected,
+        )
+        return self._commit_result(result, stable=True, completed_at=completed_at)
+
+    def register_new_garment(
+        self, cycle_id: str, *, product_name: str | None, wearer_name: str | None
+    ) -> DisplaySnapshot | None:
+        cycle = self.active_cycle
+        if cycle is None or self.pending_epc is None or cycle.cycle_id != cycle_id:
+            return None
+        epc = self.pending_epc
+        measured = self.pending_measured_weight_g
+        try:
+            self.repository.register_garment(
+                epc=epc,
+                weight_mg=round(measured * 1_000) if measured is not None else 0,
+                product_name=product_name,
+                wearer_name=wearer_name,
+                calibration_version=cycle.calibration_version,
+            )
+            garment = self.repository.garment_by_epc(epc)
+        except GarmentAlreadyExists:
+            raise
+        except Exception:
+            logger.exception("garment registration failed; station forced unavailable")
+            self._clear_pending()
+            return self.on_database_error()
+        self._clear_pending()
+        # The measured weight became this garment's clean reference, so a healthy
+        # capture re-evaluates to PASS; metal on the plate still forces a CHECK.
+        result = evaluate_cycle(
+            epcs=(epc,),
+            measured_weight_g=measured,
+            stable=True,
+            garment=garment,
+            settings=self.settings,
+            metal=cycle.metal_detected,
+        )
+        return self._commit_result(result, stable=True, completed_at=utc_now())
+
+    def dismiss_new_garment(self, cycle_id: str) -> DisplaySnapshot | None:
+        cycle = self.active_cycle
+        if cycle is None or self.pending_epc is None or cycle.cycle_id != cycle_id:
+            return None
+        return self._resolve_pending_as_check(completed_at=utc_now())
+
+    def _clear_pending(self) -> None:
+        self.pending_epc = None
+        self.pending_measured_weight_g = None
+        self.pending_since_monotonic = None
+
     def _reset_cycle(self, *, require_empty: bool) -> None:
         self.active_cycle = None
         self.result = None
@@ -457,6 +591,7 @@ class CycleStateMachine:
         self.result_removed_monotonic = None
         self.feedback_category = None
         self.feedback_recorded_monotonic = None
+        self._clear_pending()
         self.empty_weights.clear()
         self.needs_empty = require_empty
 
@@ -520,6 +655,7 @@ class CycleStateMachine:
             garment=garment.garment if garment else None,
             measurement=measurement,
             metal_detected=metal_detected,
+            pending_epc=self.pending_epc,
             health=self._health(now_monotonic),
             feedback_recorded=self.feedback_category is not None,
             feedback_category=self.feedback_category,

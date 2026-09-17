@@ -13,10 +13,11 @@ from pydantic import ValidationError
 
 from .config import Settings
 from .database import create_database_engine, create_schema, create_session_factory
-from .repository import CycleNotFound, FeedbackConflict, Repository
+from .repository import CycleNotFound, FeedbackConflict, GarmentAlreadyExists, Repository
 from .schemas import (
     DebugIngestRequest,
     DisplaySnapshot,
+    GarmentRegistrationRequest,
     HealthResponse,
     InspectionRequest,
     InspectionResponse,
@@ -157,6 +158,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="cycle not found") from exc
         except FeedbackConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/cycles/{cycle_id}/garment", response_model=DisplaySnapshot)
+    async def register_garment(
+        cycle_id: str, payload: GarmentRegistrationRequest, request: Request
+    ) -> DisplaySnapshot:
+        try:
+            return await service(request).resolve_new_garment(cycle_id, payload)
+        except CycleNotFound as exc:
+            raise HTTPException(status_code=404, detail="no garment awaiting registration") from exc
+        except GarmentAlreadyExists as exc:
+            raise HTTPException(status_code=409, detail="garment already registered") from exc
 
     @app.post("/api/v1/debug/reports", response_model=DisplaySnapshot)
     async def debug_report(payload: DebugIngestRequest, request: Request) -> DisplaySnapshot:
