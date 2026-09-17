@@ -105,7 +105,7 @@ bool UHF_RFID::pollOnce(Tag &tag, uint32_t timeoutMs) {
     if (!_serial) return false;
 
     // Drop anything left in the RX buffer so we parse a fresh reply.
-    while (true) {
+    for (int _f = 0; _f < 10; _f++) {
         while (_serial->available()) _serial->read();
         delay(2);
         if (!_serial->available()) break;
@@ -142,7 +142,7 @@ bool UHF_RFID::pollOnce(Tag &tag, uint32_t timeoutMs) {
 
 bool UHF_RFID::getVersion(String &out, uint32_t timeoutMs) {
     if (!_serial) return false;
-    while (true) {
+    for (int _f = 0; _f < 10; _f++) {
         while (_serial->available()) _serial->read();
         delay(2);
         if (!_serial->available()) break;
@@ -165,7 +165,7 @@ bool UHF_RFID::getVersion(String &out, uint32_t timeoutMs) {
 
 bool UHF_RFID::setTxPower(uint16_t dBm_x100, uint32_t timeoutMs) {
     if (!_serial) return false;
-    while (true) {
+    for (int _f = 0; _f < 10; _f++) {
         while (_serial->available()) _serial->read();
         delay(2);
         if (!_serial->available()) break;
@@ -188,7 +188,7 @@ bool UHF_RFID::setIdleMode(bool idle, uint32_t timeoutMs) {
 
     // Remove frames already buffered before sending the state-change command.
     // waitForOkResponse() also tolerates a frame that arrives just afterward.
-    while (true) {
+    for (int _f = 0; _f < 10; _f++) {
         while (_serial->available()) _serial->read();
         delay(2);
         if (!_serial->available()) break;
