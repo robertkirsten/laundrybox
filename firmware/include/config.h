@@ -14,15 +14,37 @@ constexpr uint8_t       kRfidCommandRetries   = 3;
 constexpr unsigned long kRfidStartupDelayMs   = 500; // U107 boot time after UART starts
 constexpr unsigned long kRfidWakeDelayMs      = 20;  // RF circuitry startup before polling
 
-constexpr uint8_t kNumLoadCells        = 3;
-constexpr uint8_t kLoadcellDoutPins[]  = {4, 6, 8};
-constexpr uint8_t kLoadcellSckPins[]   = {5, 7, 9};
+constexpr uint8_t kNumLoadCells        = 4;
+// One HX711 per corner. The 4th cell is assumed to continue the pin pattern;
+// verify DOUT=10 / SCK=11 against the actual wiring.
+constexpr uint8_t kLoadcellDoutPins[]  = {4, 6, 8, 10};
+constexpr uint8_t kLoadcellSckPins[]   = {5, 7, 9, 11};
 
-// TEMPORARY FIX: Cell 1 is mounted upside down, which causes its reading to be negative.
-// We multiply its reading by -1 to flip it. Change this back to {1, 1} once it's remounted correctly!
-constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f};//, -1.0f};
+// All four corners read positive under a downward load.
+constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};
 
-constexpr float   kCalibrationFactor = 205.212280f;
+// Per-corner gain calibration: raw counts/gram for each cell, in cell order.
+// Runtime weight = sum_i (cellRaw[i] - offset[i]) * polarity[i] / kCalibrationFactors[i].
+// PLACEHOLDER: these all equal the previous single combined factor, so the scale
+// behaves exactly as it did before until you run the 4-corner calibration in
+// firmware_hx711 and paste the four values it prints here.
+constexpr float kCalibrationFactors[kNumLoadCells] = {
+    205.212280f, 205.212280f, 205.212280f, 205.212280f};
+static_assert(sizeof(kCalibrationFactors) / sizeof(kCalibrationFactors[0]) == kNumLoadCells,
+              "kCalibrationFactors must have exactly kNumLoadCells entries");
+
+// True only once every corner has a positive factor, i.e. the scale is
+// calibrated. When false, weight is reported as null and taring is skipped.
+constexpr bool factorsAllPositive() {
+  for (uint8_t i = 0; i < kNumLoadCells; i++) {
+    if (!(kCalibrationFactors[i] > 0.0f)) {
+      return false;
+    }
+  }
+  return true;
+}
+constexpr bool kScaleCalibrated = factorsAllPositive();
+
 constexpr uint8_t kTareSamples       = 20;
 
 // Re-zero the empty box after a real garment has been removed. The upper

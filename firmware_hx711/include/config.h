@@ -1,17 +1,18 @@
 #pragma once
 #include <Arduino.h>
 
-constexpr uint8_t kNumLoadCells        = 3;
-constexpr uint8_t kLoadcellDoutPins[]  = {4, 6, 8};
-constexpr uint8_t kLoadcellSckPins[]   = {5, 7, 9};
+constexpr uint8_t kNumLoadCells        = 4;
+// One HX711 per corner. The 4th cell is assumed to continue the pin pattern;
+// verify DOUT=10 / SCK=11 against the actual wiring before calibrating.
+constexpr uint8_t kLoadcellDoutPins[]  = {4, 6, 8, 10};
+constexpr uint8_t kLoadcellSckPins[]   = {5, 7, 9, 11};
 
-// TEMPORARY FIX: Cell 1 is mounted upside down, which causes its reading to be negative.
-// We multiply its reading by -1 to flip it. Change this back to {1, 1} once it's remounted correctly!
-constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f};//, -1.0f};
+// All four corners read positive under a downward load.
+constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};
 
 constexpr uint8_t kTareSamples        = 20;
 constexpr uint8_t kCalibrationSamples = 20;
 
-// Minimum tared ADC counts from the reference mass to accept as valid.
-// Guards against wiring errors or an empty-scale measurement.
+// Minimum tared ADC counts (summed across all cells) at a single placement to
+// accept as valid. Guards against a forgotten mass or a wiring error.
 constexpr float kMinReferenceSignalCounts = 100.0f;

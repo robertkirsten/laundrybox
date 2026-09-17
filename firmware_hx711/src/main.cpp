@@ -16,6 +16,26 @@ namespace {
 
 HX711 gCells[kNumLoadCells];
 
+// The reference mass is placed at each of these positions in turn. We need at
+// least kNumLoadCells independent placements to solve for every corner factor;
+// the four corners give that, and the extra centre placement makes the fit
+// better conditioned and yields a residual we can report as a quality check.
+constexpr uint8_t kNumPlacements = 5;  // 4 corners + centre
+const char *const kPlacementNames[kNumPlacements] = {
+    "the FRONT-LEFT corner",
+    "the FRONT-RIGHT corner",
+    "the BACK-RIGHT corner",
+    "the BACK-LEFT corner",
+    "the CENTRE",
+};
+static_assert(sizeof(kPlacementNames) / sizeof(kPlacementNames[0]) == kNumPlacements,
+              "kPlacementNames must have exactly kNumPlacements entries");
+static_assert(kNumPlacements >= kNumLoadCells,
+              "need at least kNumLoadCells placements to solve for every corner");
+static_assert(kNumLoadCells == 4,
+              "placement prompts assume a 4-corner plate; update kPlacementNames "
+              "and kNumPlacements for a different geometry");
+
 void haltWithError(const char *message) {
   Serial.print("ERROR: ");
   Serial.println(message);
@@ -81,16 +101,72 @@ float readCalibrationMassG() {
   }
 }
 
+// Solve the n×n system A·x = b in place (Gaussian elimination with partial
+// pivoting), where n == kNumLoadCells. A and b are overwritten. Returns false if
+// the matrix is singular, i.e. the placements were not independent enough.
+bool solveLinearSystem(double A[kNumLoadCells][kNumLoadCells],
+                       double b[kNumLoadCells],
+                       double x[kNumLoadCells]) {
+  constexpr uint8_t n = kNumLoadCells;
+
+  for (uint8_t col = 0; col < n; col++) {
+    uint8_t pivot = col;
+    double best = fabs(A[col][col]);
+    for (uint8_t row = col + 1; row < n; row++) {
+      const double magnitude = fabs(A[row][col]);
+      if (magnitude > best) {
+        best = magnitude;
+        pivot = row;
+      }
+    }
+    if (best <= 0.0) {
+      return false;
+    }
+
+    if (pivot != col) {
+      for (uint8_t c = 0; c < n; c++) {
+        const double tmp = A[col][c];
+        A[col][c] = A[pivot][c];
+        A[pivot][c] = tmp;
+      }
+      const double tmp = b[col];
+      b[col] = b[pivot];
+      b[pivot] = tmp;
+    }
+
+    for (uint8_t row = col + 1; row < n; row++) {
+      const double factor = A[row][col] / A[col][col];
+      for (uint8_t c = col; c < n; c++) {
+        A[row][c] -= factor * A[col][c];
+      }
+      b[row] -= factor * b[col];
+    }
+  }
+
+  for (int8_t row = static_cast<int8_t>(n) - 1; row >= 0; row--) {
+    if (A[row][row] == 0.0) {
+      return false;
+    }
+    double sum = b[row];
+    for (uint8_t c = row + 1; c < n; c++) {
+      sum -= A[row][c] * x[c];
+    }
+    x[row] = sum / A[row][row];
+  }
+
+  return true;
+}
+
 void runCalibration(float calibrationMassG) {
   Serial.println();
-  Serial.println("Step 1/2: Prepare the empty scale");
+  Serial.println("Step 1/3: Prepare the empty scale");
   Serial.println("Leave the plate/box installed and remove every loose object.");
   Serial.println("Press Enter when the scale is empty and stable.");
   waitForEnter();
 
-  // Tare every cell
+  // Tare every cell. A scale factor of 1 makes get_value() return tared raw
+  // ADC counts.
   for (uint8_t i = 0; i < kNumLoadCells; i++) {
-    // A scale factor of 1 makes get_value() return tared raw ADC counts.
     gCells[i].set_scale(1.0f);
 
     if (!gCells[i].wait_ready_timeout(3000)) {
@@ -107,63 +183,137 @@ void runCalibration(float calibrationMassG) {
     Serial.println("done");
   }
 
+  // response[p][i] = tared counts of cell i with the mass at placement p.
+  double response[kNumPlacements][kNumLoadCells];
+
   Serial.println();
-  Serial.println("Step 2/2: Measure the reference object");
+  Serial.println("Step 2/3: Measure the reference object at each position");
   Serial.print("Place the ");
   Serial.print(calibrationMassG, 3);
-  Serial.println(" g object on the scale and keep it still.");
-  Serial.println("Press Enter when the reading is stable.");
-  waitForEnter();
+  Serial.println(" g object at each position below, one at a time.");
 
-  // Read tared counts from every cell and sum them
-  float combinedCounts = 0.0f;
-  float cellReadings[kNumLoadCells];
-  for (uint8_t i = 0; i < kNumLoadCells; i++) {
-    if (!gCells[i].wait_ready_timeout(3000)) {
-      Serial.print("ERROR: HX711 cell ");
+  for (uint8_t p = 0; p < kNumPlacements; p++) {
+    Serial.println();
+    Serial.print("Placement ");
+    Serial.print(p + 1);
+    Serial.print('/');
+    Serial.print(kNumPlacements);
+    Serial.print(": place the object over ");
+    Serial.print(kPlacementNames[p]);
+    Serial.println(", keep it still, then press Enter.");
+    waitForEnter();
+
+    double placementTotal = 0.0;
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+      if (!gCells[i].wait_ready_timeout(3000)) {
+        Serial.print("ERROR: HX711 cell ");
+        Serial.print(i);
+        Serial.println(" not ready. Calibration cancelled.");
+        return;
+      }
+
+      const double counts =
+          static_cast<double>(gCells[i].get_value(kCalibrationSamples)) *
+          kLoadcellPolarities[i];
+      response[p][i] = counts;
+      placementTotal += counts;
+
+      Serial.print("  cell ");
       Serial.print(i);
-      Serial.println(" not ready. Calibration cancelled.");
-      return;
+      Serial.print(": ");
+      Serial.println(counts, 1);
     }
 
-    Serial.print("Sampling cell ");
-    Serial.print(i);
-    Serial.print(" ... ");
-    const float cellCounts = gCells[i].get_value(kCalibrationSamples) * kLoadcellPolarities[i];
-    Serial.println(cellCounts, 3);
-    cellReadings[i] = cellCounts;
-    combinedCounts += cellCounts;
+    Serial.print("  total: ");
+    Serial.println(placementTotal, 1);
+
+    if (!isfinite(placementTotal) || placementTotal < kMinReferenceSignalCounts) {
+      Serial.println(
+          "ERROR: signal at this placement is too small. Is the object on the "
+          "scale? Calibration cancelled.");
+      return;
+    }
   }
 
-  if (!isfinite(combinedCounts) ||
-      fabsf(combinedCounts) < kMinReferenceSignalCounts) {
+  // Step 3: solve for the per-corner factors.
+  //
+  // For a rigid plate the four reaction forces always sum to the applied weight,
+  // so with x[i] = 1 / factor[i] (grams per count) every placement must satisfy
+  //   sum_i response[p][i] * x[i] = calibrationMassG.
+  // That is kNumPlacements equations in kNumLoadCells unknowns; solve it in the
+  // least-squares sense via the normal equations (AtA) x = (Atb).
+  double AtA[kNumLoadCells][kNumLoadCells] = {};
+  double Atb[kNumLoadCells] = {};
+  for (uint8_t p = 0; p < kNumPlacements; p++) {
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+      Atb[i] += response[p][i] * calibrationMassG;
+      for (uint8_t j = 0; j < kNumLoadCells; j++) {
+        AtA[i][j] += response[p][i] * response[p][j];
+      }
+    }
+  }
+
+  double x[kNumLoadCells] = {};
+  if (!solveLinearSystem(AtA, Atb, x)) {
     Serial.println(
-        "ERROR: Combined reference signal is too small. "
-        "Check the wiring, mounting, and sequence.");
+        "ERROR: could not solve the calibration system. The placements were not "
+        "independent enough; repeat with the mass clearly over each corner.");
     return;
   }
 
-  const float calibrationFactor = combinedCounts / calibrationMassG;
+  float factors[kNumLoadCells];
+  for (uint8_t i = 0; i < kNumLoadCells; i++) {
+    if (!isfinite(x[i]) || x[i] <= 0.0) {
+      Serial.print("ERROR: cell ");
+      Serial.print(i);
+      Serial.println(
+          " produced a non-physical factor (<= 0). Check its wiring, polarity, "
+          "and that the mass was placed correctly. Calibration cancelled.");
+      return;
+    }
+    factors[i] = static_cast<float>(1.0 / x[i]);
+  }
+
+  // Residual: how well each placement reproduces the known mass with the fitted
+  // factors. A large value means a bad placement or a mechanical problem.
+  double maxAbsResidualG = 0.0;
+  for (uint8_t p = 0; p < kNumPlacements; p++) {
+    double predictedG = 0.0;
+    for (uint8_t i = 0; i < kNumLoadCells; i++) {
+      predictedG += response[p][i] * x[i];
+    }
+    const double residualG = fabs(predictedG - calibrationMassG);
+    if (residualG > maxAbsResidualG) {
+      maxAbsResidualG = residualG;
+    }
+  }
 
   Serial.println();
   Serial.println("Calibration complete");
   for (uint8_t i = 0; i < kNumLoadCells; i++) {
-    Serial.print("  Cell ");
+    Serial.print("  cell ");
     Serial.print(i);
-    Serial.print(" tared reading: ");
-    Serial.println(cellReadings[i], 3);
+    Serial.print(" factor: ");
+    Serial.print(factors[i], 6);
+    Serial.println(" raw counts/gram");
   }
-  Serial.print("  Combined tared reading: ");
-  Serial.println(combinedCounts, 3);
-  Serial.print("  Calibration factor: ");
-  Serial.print(calibrationFactor, 6);
-  Serial.println(" raw counts/gram");
+  Serial.print("  max placement residual: ");
+  Serial.print(maxAbsResidualG, 2);
+  Serial.print(" g (");
+  Serial.print(100.0 * maxAbsResidualG / calibrationMassG, 2);
+  Serial.println("% of the reference mass)");
 
   Serial.println();
   Serial.println("Copy this into firmware/include/config.h:");
-  Serial.print("  constexpr float kCalibrationFactor = ");
-  Serial.print(calibrationFactor, 6);
-  Serial.println("f;");
+  Serial.print("  constexpr float kCalibrationFactors[kNumLoadCells] = {");
+  for (uint8_t i = 0; i < kNumLoadCells; i++) {
+    if (i > 0) {
+      Serial.print(", ");
+    }
+    Serial.print(factors[i], 6);
+    Serial.print('f');
+  }
+  Serial.println("};");
 
   Serial.println();
   Serial.println("Remove the object. A new calibration can now be started.");
@@ -180,7 +330,7 @@ void setup() {
   }
 
   Serial.println();
-  Serial.print("HX711 multi-cell calibration firmware (");
+  Serial.print("HX711 4-corner gain calibration firmware (");
   Serial.print(kNumLoadCells);
   Serial.println(" load cells)");
   Serial.println("Serial speed: 57600 baud");
