@@ -24,10 +24,10 @@ constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f, 1.0f};//, -1.0f};
 // PLACEHOLDER: these all equal the previous single combined factor, so the scale
 // behaves exactly as it did before until you run the 4-corner calibration in
 // firmware_hx711 and paste the four values it prints here.
-constexpr float kCalibrationFactors[kNumLoadCells] = {200.938278f, 207.794754f, 196.681000f, 207.604858f};
+constexpr float kCalibrationFactors[kNumLoadCells] = {202.455582f, 209.137711f, 197.145020f, 208.115631f};
 //560.6g bottle on plate without box: {202.455582f, 209.137711f, 197.145020f, 208.115631f};
-//560.6g bottle moved in box: {201.055771f, 207.862122f, 196.580154f, 207.415833f};
-//3559.6g bottle + box only bottle moved in box: {200.938278f, 207.794754f, 196.681000f, 207.604858f};
+//560.6g bottle moved in box: {201.055771f, 207.862122f, 196.580154f, 207.415833f};  NOT GOOD (OVERSHOOTING)
+//3559.6g bottle + box only bottle moved in box: {200.938278f, 207.794754f, 196.681000f, 207.604858f};  NOT GOOD (OVERSHOOTING)
 static_assert(sizeof(kCalibrationFactors) / sizeof(kCalibrationFactors[0]) == kNumLoadCells,
               "kCalibrationFactors must have exactly kNumLoadCells entries");
 

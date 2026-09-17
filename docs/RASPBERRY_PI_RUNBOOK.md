@@ -165,18 +165,63 @@ or replace the production database.
 
 ## Configuration changes
 
-Edit production settings in one place:
+All production settings live in a single file:
+
+```
+/etc/argus/argus.env
+```
+
+To change a setting, edit the file and restart the backend:
 
 ```sh
 sudo nano /etc/argus/argus.env
 sudo argusctl restart
 ```
 
-Current weight stability defaults are three consecutive readings within a total
-2 g range. The 6-second acquisition timeout remains the fallback.
-An unanswered CHECK remains available for 30 seconds after garment removal;
-then it is recorded as `nothing_found` and the display returns to ready. Placing
-the next garment before that timeout performs the same automatic completion.
+Verify the backend picked up the change:
+
+```sh
+argusctl health
+```
+
+### Available settings
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ARGUS_LOG_LEVEL` | `INFO` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `ARGUS_JSON_LOGS` | `true` | Emit structured JSON logs (`true`) or plain text (`false`) |
+| `ARGUS_SERIAL_PORT` | `/dev/argus-teensy` | Primary Teensy serial device |
+| `ARGUS_SERIAL_FALLBACK_PORT` | `/dev/ttyACM0` | Fallback if the udev symlink is missing |
+| `ARGUS_SERIAL_ENABLED` | `true` | Disable to run without a Teensy (e.g. for UI-only testing) |
+| `ARGUS_SERIAL_STALE_AFTER_S` | `2.0` | Seconds without a Teensy report before health shows stale |
+| `ARGUS_THRESHOLD_G` | `3.0` | Weight difference (grams) that triggers a CHECK decision |
+| `ARGUS_EMPTY_WEIGHT_MAX_G` | `10.0` | Maximum weight (g) considered an empty scale |
+| `ARGUS_MIN_GARMENT_WEIGHT_G` | `50.0` | Minimum weight (g) to accept as a garment |
+| `ARGUS_MAX_GARMENT_WEIGHT_G` | `1000.0` | Maximum weight (g) to accept as a garment |
+| `ARGUS_STABILITY_TOLERANCE_G` | `2.0` | Total range (g) for readings to be considered stable |
+| `ARGUS_STABILITY_WINDOW_SIZE` | `3` | Consecutive readings that must be within tolerance |
+| `ARGUS_REMOVAL_CONFIRM_SAMPLES` | `3` | Consecutive light readings before confirming garment removal |
+| `ARGUS_MINIMUM_TAG_READS` | `2` | Minimum RFID tag reads before accepting a scan |
+| `ARGUS_ACQUISITION_TIMEOUT_S` | `6.0` | Seconds to wait for stable weight before timing out |
+| `ARGUS_INSPECTION_TIMEOUT_S` | `30.0` | Seconds a CHECK stays on screen before auto-completing |
+| `ARGUS_FEEDBACK_DISPLAY_S` | `3.0` | Seconds the feedback confirmation is shown |
+| `ARGUS_METAL_CHECK_ENABLED` | `true` | Whether ferrous metal detection forces a CHECK |
+| `ARGUS_SEED_MOCK_DATA` | `true` | Seed garments from the CSV fixture on startup |
+| `ARGUS_MOCK_DATA_PATH` | `/etc/argus/mock_garments.csv` | Path to the garment fixture CSV |
+| `ARGUS_ENABLE_DEBUG_INGEST` | `false` | Enable the `POST /api/v1/debug/reports` endpoint |
+| `ARGUS_NEOPIXEL_ENABLED` | `true` | Enable the addressable LED status strip |
+| `ARGUS_NEOPIXEL_COUNT` | `60` | Number of pixels on the strip |
+| `ARGUS_NEOPIXEL_BRIGHTNESS` | `0.3` | Brightness (0.0–0.5); values above 0.5 are rejected |
+| `ARGUS_STATION_CODE` | `ARGUS-01` | Station identifier shown in the UI and stored in cycles |
+| `ARGUS_OPERATOR_NUMBER` | `4471` | Default operator number |
+| `ARGUS_CORS_ORIGINS` | `["http://127.0.0.1:3000", ...]` | Allowed CORS origins (JSON array) |
+
+> [!NOTE]
+> Deployments (`sudo ./argus deploy`) never overwrite `/etc/argus/argus.env`.
+> Only `sudo ./argus install` creates the initial file from the template.
+> The garment CSV at `/etc/argus/mock_garments.csv` is likewise only copied on
+> first install; editing it and restarting the backend seeds new rows without
+> removing existing garments.
 
 ## Addressable status strip
 
