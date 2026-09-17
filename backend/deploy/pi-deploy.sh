@@ -20,9 +20,11 @@ die() {
 [[ -f "$LAUNDRY_SOURCE/backend/pyproject.toml" ]] || die "invalid LaundryBox source: $LAUNDRY_SOURCE"
 [[ -f "$FRONTEND_SOURCE/package.json" ]] || die "invalid frontend source: $FRONTEND_SOURCE"
 
-for command in python3 node npm rsync curl sqlite3 systemctl udevadm runuser; do
+for command in python3 node npm rsync curl sqlite3 systemctl udevadm runuser swig; do
     command -v "$command" >/dev/null 2>&1 || die "required command not found: $command"
 done
+dpkg-query -W -f='${Status}' liblgpio-dev 2>/dev/null | grep -Fq 'install ok installed' \
+    || die "required package not installed: liblgpio-dev"
 [[ -x /usr/bin/node ]] || die "production requires Node at /usr/bin/node"
 
 python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \

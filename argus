@@ -40,14 +40,23 @@ port_is_busy() {
 }
 
 prepare_dev() {
-    local frontend="$1"
+    local frontend="$1" dependency_fingerprint dependency_stamp
     require_command python3
     require_command npm
 
-    if [[ ! -x "$BACKEND_DIR/.venv/bin/argus-backend" || ! -x "$BACKEND_DIR/.venv/bin/pytest" ]]; then
+    if [[ ! -x "$BACKEND_DIR/.venv/bin/python" ]]; then
         echo "Creating backend environment..."
         python3 -m venv "$BACKEND_DIR/.venv"
+    fi
+    dependency_stamp="$BACKEND_DIR/.venv/.argus-pyproject.cksum"
+    dependency_fingerprint="$(cksum <"$BACKEND_DIR/pyproject.toml")"
+    if [[ ! -x "$BACKEND_DIR/.venv/bin/argus-backend" \
+        || ! -x "$BACKEND_DIR/.venv/bin/pytest" \
+        || ! -f "$dependency_stamp" \
+        || "$(<"$dependency_stamp")" != "$dependency_fingerprint" ]]; then
+        echo "Installing backend dependencies..."
         "$BACKEND_DIR/.venv/bin/python" -m pip install -e "$BACKEND_DIR[dev]"
+        printf '%s\n' "$dependency_fingerprint" >"$dependency_stamp"
     fi
     if [[ ! -f "$BACKEND_DIR/.env" ]]; then
         cp "$BACKEND_DIR/.env.example" "$BACKEND_DIR/.env"

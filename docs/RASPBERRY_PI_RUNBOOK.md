@@ -39,6 +39,13 @@ firmware build when PlatformIO is installed.
 
 ## First production installation
 
+Install the native build prerequisite used by the Raspberry Pi GPIO dependency:
+
+```sh
+sudo apt update
+sudo apt install -y swig liblgpio-dev
+```
+
 Install from the current two checkouts:
 
 ```sh

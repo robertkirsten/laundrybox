@@ -22,7 +22,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     settings = Settings(_env_file=args.env_file) if args.env_file else Settings()
-    led_test(settings, delay_s=args.delay, cycles=args.cycles, color_name=args.color)
+    try:
+        led_test(settings, delay_s=args.delay, cycles=args.cycles, color_name=args.color)
+    except ModuleNotFoundError as exc:
+        if exc.name in {"board", "neopixel_spi"}:
+            raise SystemExit(
+                "NeoPixel dependencies are missing. From the backend directory run: "
+                "python -m pip install -e ."
+            ) from None
+        raise
 
 
 if __name__ == "__main__":

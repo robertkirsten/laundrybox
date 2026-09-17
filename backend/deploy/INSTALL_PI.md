@@ -1,6 +1,8 @@
 # Raspberry Pi installation
 
-The Pi needs Python 3.11+, Node.js 22+, `npm`, `rsync`, `curl`, and `sqlite3`.
+The Pi needs Python 3.11+, Node.js 22+, `npm`, `rsync`, `curl`, `sqlite3`,
+`swig`, and `liblgpio-dev`. The last two are required to build Adafruit Blinka's
+`lgpio` dependency when no matching wheel is available.
 The two repositories should normally be sibling checkouts named `laundrybox`
 and `smart-shaft`.
 
