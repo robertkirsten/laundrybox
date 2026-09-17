@@ -181,6 +181,14 @@ If `./argus dev` reports port 3000 or 8000 in use, stop production first:
 sudo argusctl stop
 ```
 
+Installations created before the unified ARGUS services may still have a
+legacy `smart-shaft.service`. Current deployments disable it automatically. To
+remove the conflict manually before deploying, run:
+
+```sh
+sudo systemctl disable --now smart-shaft.service
+```
+
 If the Teensy is not detected:
 
 ```sh

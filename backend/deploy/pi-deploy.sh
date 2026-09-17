@@ -178,6 +178,13 @@ trap rollback ERR
 udevadm control --reload-rules
 udevadm trigger
 systemctl daemon-reload
+# Older installations used smart-shaft.service for the frontend. Leaving it
+# enabled makes it reclaim port 3000 even though argus-frontend.service is
+# stopped, and argusctl cannot otherwise control that legacy process.
+if systemctl cat smart-shaft.service >/dev/null 2>&1; then
+    echo "Disabling legacy smart-shaft.service..."
+    systemctl disable --now smart-shaft.service
+fi
 systemctl enable argus-backend.service argus-frontend.service argus-backup.timer
 systemctl restart argus-backend.service argus-frontend.service
 systemctl start argus-backup.timer
