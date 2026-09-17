@@ -94,7 +94,7 @@ The operator flow is:
 ```text
 UNAVAILABLE → stable empty → WAITING → garment detected → ACQUIRING
             → stable weight + EPC or timeout → PASS/CHECK
-            → inspection feedback → stable empty → WAITING
+            → inspection feedback, replacement garment, or removal timeout → WAITING
 ```
 
 The reference decision is:

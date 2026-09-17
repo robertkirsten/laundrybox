@@ -12,6 +12,7 @@ from argus_backend.schemas import (
     Decision,
     DecisionReason,
     InspectionCategory,
+    InspectionRequest,
     Lifecycle,
     TeensyEvent,
     TeensyReport,
@@ -28,7 +29,7 @@ def report(
     return TeensyReport(v=1, t=0, raw=None, weight_g=weight_g, tags=tags, stable=stable)
 
 
-def test_restart_requires_empty_then_persists_pass_cycle(
+def test_restart_requires_empty_then_clears_pass_cycle_after_removal(
     settings: Settings, repository: Repository
 ) -> None:
     machine = CycleStateMachine(settings, repository)
@@ -79,23 +80,26 @@ def test_restart_requires_empty_then_persists_pass_cycle(
     assert scan.reference_weight_g == 240.0
 
     assert machine.on_report(report(0.0), now_monotonic=0.5) is None
-    assert machine.on_report(report(0.0), now_monotonic=0.6) is None
-    assert machine.result is not None
-    assert machine.active_cycle is not None
-    assert machine.active_cycle.cycle_id == passed.cycle_id
+    waiting = machine.on_report(report(0.0), now_monotonic=0.6)
+    assert waiting is not None
+    assert waiting.lifecycle is Lifecycle.WAITING
+    assert waiting.cycle_id is None
+    assert waiting.decision is None
+    assert machine.result is None
+    assert machine.active_cycle is None
 
 
-def test_removed_result_stays_pending_until_feedback_is_recorded(
+def test_removed_check_result_stays_pending_until_feedback_is_recorded(
     settings: Settings, repository: Repository
 ) -> None:
     machine = CycleStateMachine(settings, repository)
     machine.on_serial_connected()
     machine.on_report(report(0.0), now_monotonic=0.0)
     machine.on_report(report(0.0), now_monotonic=0.1)
-    machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.2)
-    result = machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.3)
+    machine.on_report(report(250.0, epc=EPC, stable=True), now_monotonic=0.2)
+    result = machine.on_report(report(250.0, epc=EPC, stable=True), now_monotonic=0.3)
     assert result is not None
-    assert result.lifecycle is Lifecycle.PASS
+    assert result.lifecycle is Lifecycle.CHECK
     assert result.cycle_id is not None
 
     assert machine.on_report(report(0.0), now_monotonic=0.4) is None
@@ -113,10 +117,11 @@ def test_new_garment_skips_unanswered_result_as_nothing_found(
     machine.on_serial_connected()
     machine.on_report(report(0.0), now_monotonic=0.0)
     machine.on_report(report(0.0), now_monotonic=0.1)
-    machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.2)
-    result = machine.on_report(report(240.0, epc=EPC, stable=True), now_monotonic=0.3)
+    machine.on_report(report(250.0, epc=EPC, stable=True), now_monotonic=0.2)
+    result = machine.on_report(report(250.0, epc=EPC, stable=True), now_monotonic=0.3)
     assert result is not None
     assert result.cycle_id is not None
+    assert result.lifecycle is Lifecycle.CHECK
 
     machine.on_report(report(0.0), now_monotonic=0.4)
     next_cycle = machine.on_report(report(620.0, epc="E28011052000773420000002"), now_monotonic=0.5)
@@ -125,6 +130,43 @@ def test_new_garment_skips_unanswered_result_as_nothing_found(
     assert next_cycle.lifecycle is Lifecycle.ACQUIRING
     assert next_cycle.cycle_id != result.cycle_id
     assert repository.feedback_exists(result.cycle_id)
+    recorded = repository.add_feedback(
+        result.cycle_id,
+        InspectionRequest(category=InspectionCategory.NOTHING_FOUND),
+    )
+    assert recorded.duplicate
+    assert recorded.category is InspectionCategory.NOTHING_FOUND
+
+
+def test_removed_check_result_times_out_as_nothing_found(
+    settings: Settings, repository: Repository
+) -> None:
+    machine = CycleStateMachine(settings, repository)
+    machine.on_serial_connected()
+    machine.on_report(report(0.0), now_monotonic=0.0)
+    machine.on_report(report(0.0), now_monotonic=0.1)
+    machine.on_report(report(250.0, epc=EPC, stable=True), now_monotonic=0.2)
+    result = machine.on_report(report(250.0, epc=EPC, stable=True), now_monotonic=0.3)
+    assert result is not None
+    assert result.lifecycle is Lifecycle.CHECK
+    assert result.cycle_id is not None
+
+    machine.on_report(report(0.0), now_monotonic=0.4)
+    assert (
+        machine.tick(now_monotonic=0.4 + settings.inspection_timeout_s - 0.01) is None
+    )
+    assert not repository.feedback_exists(result.cycle_id)
+
+    waiting = machine.tick(now_monotonic=0.4 + settings.inspection_timeout_s)
+    assert waiting is not None
+    assert waiting.lifecycle is Lifecycle.WAITING
+    assert waiting.cycle_id is None
+    recorded = repository.add_feedback(
+        result.cycle_id,
+        InspectionRequest(category=InspectionCategory.NOTHING_FOUND),
+    )
+    assert recorded.duplicate
+    assert recorded.category is InspectionCategory.NOTHING_FOUND
 
 
 def test_missing_weight_can_never_produce_pass(settings: Settings, repository: Repository) -> None:

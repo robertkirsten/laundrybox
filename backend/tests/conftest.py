@@ -20,6 +20,7 @@ def settings(tmp_path: Path) -> Settings:
         removal_confirm_samples=2,
         minimum_tag_reads=2,
         acquisition_timeout_s=1.0,
+        inspection_timeout_s=2.0,
         monitor_interval_s=0.01,
     )
 

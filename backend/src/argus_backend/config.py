@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     removal_confirm_samples: int = Field(default=3, ge=2, le=1_000)
     minimum_tag_reads: int = Field(default=2, ge=1, le=1_000)
     acquisition_timeout_s: float = Field(default=6.0, gt=0)
+    inspection_timeout_s: float = Field(default=30.0, gt=0)
     monitor_interval_s: float = Field(default=0.25, gt=0)
 
     station_code: str = "ARGUS-01"

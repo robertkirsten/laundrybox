@@ -85,6 +85,7 @@ class CycleStateMachine:
         self.result: DecisionResult | None = None
         self.result_garment: GarmentLookup | None = None
         self.result_removed = False
+        self.result_removed_monotonic: float | None = None
         self.feedback_category: InspectionCategory | None = None
         self.lifecycle = Lifecycle.UNAVAILABLE
         self.reason = DecisionReason.SERIAL_DISCONNECTED
@@ -176,6 +177,17 @@ class CycleStateMachine:
             return self._snapshot()
 
         if self.result is not None:
+            # A PASS needs no operator inspection. Once the garment has been
+            # removed and the empty box is confirmed, immediately return the
+            # display to the ready state.
+            if self.result.decision is Decision.PASS:
+                if self._observe_empty(weight_g, report.stable):
+                    self._reset_cycle(require_empty=False)
+                    self.lifecycle = Lifecycle.WAITING
+                    self.reason = DecisionReason.WAITING_FOR_GARMENT
+                    return self._snapshot()
+                return None
+
             if self.feedback_category is not None:
                 if self._observe_empty(weight_g, report.stable):
                     self._reset_cycle(require_empty=False)
@@ -196,19 +208,13 @@ class CycleStateMachine:
                 # window could miss a quick remove-and-replace operation.
                 if abs(weight_g) <= self.settings.empty_weight_max_g:
                     self.result_removed = True
+                    self.result_removed_monotonic = now_monotonic
                     self.empty_weights.clear()
                 return None
             if abs(weight_g) <= self.settings.empty_weight_max_g:
                 return None
 
-            cycle = self.active_cycle
-            if cycle is None:  # pragma: no cover - guarded by result lifecycle invariants
-                raise RuntimeError("completed result has no active cycle")
-            self.repository.add_feedback(
-                cycle.cycle_id,
-                InspectionRequest(category=InspectionCategory.NOTHING_FOUND),
-            )
-            self._reset_cycle(require_empty=False)
+            self._complete_unanswered_inspection()
 
         if self.active_cycle is None:
             if abs(weight_g) <= self.settings.empty_weight_max_g:
@@ -262,7 +268,31 @@ class CycleStateMachine:
         ):
             stable, measured_weight_g = self._stable_weight(None)
             return self._finalize(measured_weight_g, stable=stable, completed_at=utc_now())
+
+        if (
+            cycle is not None
+            and self.result is not None
+            and self.result.decision is Decision.CHECK
+            and self.feedback_category is None
+            and self.result_removed_monotonic is not None
+            and now_monotonic - self.result_removed_monotonic
+            >= self.settings.inspection_timeout_s
+        ):
+            self._complete_unanswered_inspection()
+            self.lifecycle = Lifecycle.WAITING
+            self.reason = DecisionReason.WAITING_FOR_GARMENT
+            return self._snapshot(now_monotonic=now_monotonic)
         return None
+
+    def _complete_unanswered_inspection(self) -> None:
+        cycle = self.active_cycle
+        if cycle is None:  # pragma: no cover - guarded by result lifecycle invariants
+            raise RuntimeError("completed result has no active cycle")
+        self.repository.add_feedback(
+            cycle.cycle_id,
+            InspectionRequest(category=InspectionCategory.NOTHING_FOUND),
+        )
+        self._reset_cycle(require_empty=False)
 
     def mark_feedback_recorded(
         self, cycle_id: str, category: InspectionCategory
@@ -393,6 +423,7 @@ class CycleStateMachine:
         self.result = None
         self.result_garment = None
         self.result_removed = False
+        self.result_removed_monotonic = None
         self.feedback_category = None
         self.empty_weights.clear()
         self.needs_empty = require_empty

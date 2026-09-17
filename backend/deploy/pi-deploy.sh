@@ -27,8 +27,8 @@ done
 
 python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \
     || die "Python 3.11 or newer is required"
-/usr/bin/node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 22)' \
-    || die "Node.js 22 or newer is required"
+/usr/bin/node -e 'process.exitCode = Number(process.versions.node.split(".")[0]) < 22 ? 1 : 0' \
+    || die "Node.js 22 or newer is required at /usr/bin/node (found $(/usr/bin/node --version))"
 
 if [[ "$MODE" == install ]]; then
     if ! getent group argus >/dev/null; then

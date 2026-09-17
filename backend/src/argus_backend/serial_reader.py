@@ -56,19 +56,30 @@ class SerialReader:
                 connected = True
                 logger.info("opened Teensy serial port %s", path)
                 await self._on_connected()
+                pending = bytearray()
                 while not self._stop.is_set():
-                    raw = await asyncio.to_thread(
+                    chunk = await asyncio.to_thread(
                         device.read_until,
                         b"\n",
-                        self._settings.max_serial_line_bytes + 1,
+                        self._settings.max_serial_line_bytes + 1 - len(pending),
                     )
-                    if not raw:
+                    if not chunk:
                         continue
-                    logger.debug("Teensy serial: %s", raw.decode(errors="replace").rstrip())
-                    if len(raw) > self._settings.max_serial_line_bytes:
+                    pending.extend(chunk)
+                    if len(pending) > self._settings.max_serial_line_bytes:
                         logger.warning("discarding overlong serial line")
+                        pending.clear()
                         await asyncio.to_thread(device.reset_input_buffer)
                         continue
+                    # pyserial returns partial data when its timeout expires,
+                    # even when read_until() has not seen the delimiter yet.
+                    # Preserve that fragment and finish the JSON frame on the
+                    # next read instead of trying to validate both halves.
+                    if not pending.endswith(b"\n"):
+                        continue
+                    raw = bytes(pending)
+                    pending.clear()
+                    logger.debug("Teensy serial: %s", raw.decode(errors="replace").rstrip())
                     try:
                         message = self._adapter.validate_json(raw)
                     except ValidationError as exc:

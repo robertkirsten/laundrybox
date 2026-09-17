@@ -167,6 +167,9 @@ sudo argusctl restart
 
 Current weight stability defaults are three consecutive readings within a total
 2 g range. The 6-second acquisition timeout remains the fallback.
+An unanswered CHECK remains available for 30 seconds after garment removal;
+then it is recorded as `nothing_found` and the display returns to ready. Placing
+the next garment before that timeout performs the same automatic completion.
 
 The garment CSV is copied to `/etc/argus/mock_garments.csv` only on first
 installation, so deployments do not overwrite local garments. New rows are
