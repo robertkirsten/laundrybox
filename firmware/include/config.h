@@ -6,7 +6,7 @@
 
 constexpr unsigned long kHostBaud    = 115200;
 constexpr unsigned long kRfidBaud    = 115200;
-constexpr uint16_t      kRfidTxPower = 2600;   // dBm * 100 = 26.00 dBm
+constexpr uint16_t      kRfidTxPower = 2300;   // dBm * 100 = 26.00 dBm
 constexpr unsigned long kRfidWindowMs      = 100;  // ms spent polling RFID before weighing
 constexpr uint32_t      kRfidPollTimeoutMs = 50;   // single pollOnce() timeout
 constexpr uint32_t      kRfidCommandTimeoutMs = 200; // IDLE-mode command timeout
@@ -14,15 +14,15 @@ constexpr uint8_t       kRfidCommandRetries   = 3;
 constexpr unsigned long kRfidStartupDelayMs   = 500; // U107 boot time after UART starts
 constexpr unsigned long kRfidWakeDelayMs      = 20;  // RF circuitry startup before polling
 
-constexpr uint8_t kNumLoadCells        = 1;
-constexpr uint8_t kLoadcellDoutPins[]  = {2};//, 4};
-constexpr uint8_t kLoadcellSckPins[]   = {3};//, 5};
+constexpr uint8_t kNumLoadCells        = 3;
+constexpr uint8_t kLoadcellDoutPins[]  = {4, 6, 8};
+constexpr uint8_t kLoadcellSckPins[]   = {5, 7, 9};
 
 // TEMPORARY FIX: Cell 1 is mounted upside down, which causes its reading to be negative.
 // We multiply its reading by -1 to flip it. Change this back to {1, 1} once it's remounted correctly!
-constexpr float kLoadcellPolarities[]  = {1.0f};//, -1.0f};
+constexpr float kLoadcellPolarities[]  = {1.0f, 1.0f, 1.0f};//, -1.0f};
 
-constexpr float   kCalibrationFactor = 107.026405f;
+constexpr float   kCalibrationFactor = 205.212280f;
 constexpr uint8_t kTareSamples       = 20;
 
 // Re-zero the empty box after a real garment has been removed. The upper

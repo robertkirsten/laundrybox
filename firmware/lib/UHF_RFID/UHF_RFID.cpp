@@ -84,7 +84,7 @@ bool UHF_RFID::waitForOkResponse(uint8_t expectedCmd, uint32_t timeoutMs) {
         const uint32_t elapsed = millis() - start;
         uint8_t buf[64];
         const int n = readFrame(buf, sizeof(buf), timeoutMs - elapsed);
-        if (n < 0) return false;
+        if (n < 0) continue;
 
         // M100 firmware versions are inconsistent about the Type byte. The
         // command code is the reliable way to associate a non-error response
@@ -105,7 +105,11 @@ bool UHF_RFID::pollOnce(Tag &tag, uint32_t timeoutMs) {
     if (!_serial) return false;
 
     // Drop anything left in the RX buffer so we parse a fresh reply.
-    while (_serial->available()) _serial->read();
+    while (true) {
+        while (_serial->available()) _serial->read();
+        delay(2);
+        if (!_serial->available()) break;
+    }
 
     // Single-polling inventory command: BB 00 22 00 00 22 7E
     sendFrame(0x00, 0x22, nullptr, 0);
@@ -138,7 +142,11 @@ bool UHF_RFID::pollOnce(Tag &tag, uint32_t timeoutMs) {
 
 bool UHF_RFID::getVersion(String &out, uint32_t timeoutMs) {
     if (!_serial) return false;
-    while (_serial->available()) _serial->read();
+    while (true) {
+        while (_serial->available()) _serial->read();
+        delay(2);
+        if (!_serial->available()) break;
+    }
 
     // Info command, data byte 0x00 = hardware version.
     const uint8_t param = 0x00;
@@ -157,7 +165,11 @@ bool UHF_RFID::getVersion(String &out, uint32_t timeoutMs) {
 
 bool UHF_RFID::setTxPower(uint16_t dBm_x100, uint32_t timeoutMs) {
     if (!_serial) return false;
-    while (_serial->available()) _serial->read();
+    while (true) {
+        while (_serial->available()) _serial->read();
+        delay(2);
+        if (!_serial->available()) break;
+    }
 
     const uint8_t param[2] = { (uint8_t)(dBm_x100 >> 8), (uint8_t)(dBm_x100 & 0xFF) };
     sendFrame(0x00, 0xB6, param, 2);
@@ -176,7 +188,11 @@ bool UHF_RFID::setIdleMode(bool idle, uint32_t timeoutMs) {
 
     // Remove frames already buffered before sending the state-change command.
     // waitForOkResponse() also tolerates a frame that arrives just afterward.
-    while (_serial->available()) _serial->read();
+    while (true) {
+        while (_serial->available()) _serial->read();
+        delay(2);
+        if (!_serial->available()) break;
+    }
     sendFrame(0x00, 0x04, params, sizeof(params));
     return waitForOkResponse(0x04, timeoutMs);
 }
