@@ -1,5 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
+import {
+  Coins,
+  FileText,
+  Headphones,
+  Key,
+  Pen,
+  Plus,
+  Scissors,
+  Square,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import { useArgusState } from "@/hooks/use-argus-state";
 import {
   postInspection,
@@ -28,19 +40,19 @@ type InspectionScreen = "result" | "check" | "found";
 type FrameStatus = "ok" | "err" | "neutral";
 
 const FOUND_ITEMS: ReadonlyArray<{
-  icon: string;
+  Icon: LucideIcon;
   label: string;
   category: InspectionCategory;
 }> = [
-  { icon: "✂", label: "Schere", category: "scissors" },
-  { icon: "🔑", label: "Schlüssel", category: "keys" },
-  { icon: "🪙", label: "Geld", category: "money" },
-  { icon: "📄", label: "Papier", category: "paper" },
-  { icon: "🖊", label: "Stift", category: "pen" },
-  { icon: "🧻", label: "Taschentücher", category: "tissues" },
-  { icon: "🎧", label: "Kopfhörer", category: "headphones" },
-  { icon: "🛠", label: "Werkzeug", category: "tool" },
-  { icon: "＋", label: "Sonstiges", category: "other" },
+  { Icon: Scissors, label: "Schere", category: "scissors" },
+  { Icon: Key, label: "Schlüssel", category: "keys" },
+  { Icon: Coins, label: "Geld", category: "money" },
+  { Icon: FileText, label: "Papier", category: "paper" },
+  { Icon: Pen, label: "Stift", category: "pen" },
+  { Icon: Square, label: "Taschentücher", category: "tissues" },
+  { Icon: Headphones, label: "Kopfhörer", category: "headphones" },
+  { Icon: Wrench, label: "Werkzeug", category: "tool" },
+  { Icon: Plus, label: "Sonstiges", category: "other" },
 ];
 
 const REASON_LABELS: Record<string, string> = {
@@ -95,10 +107,10 @@ function Frame({
     <div className="min-h-screen bg-paper p-3 font-body text-ink">
       <div
         className={cn(
-          "relative flex min-h-[calc(100vh-24px)] flex-col overflow-hidden rounded-2xl border-[10px] bg-panel",
-          status === "ok" && "border-ok",
-          status === "err" && "border-err",
-          status === "neutral" && "border-steel",
+          "relative flex min-h-[calc(100vh-24px)] flex-col overflow-hidden rounded-2xl border-[10px]",
+          status === "ok" && "border-ok bg-ok/5",
+          status === "err" && "border-err bg-err/5",
+          status === "neutral" && "border-steel bg-panel",
         )}
       >
         <TopBar snapshot={snapshot} />
@@ -213,7 +225,7 @@ function CheckStation() {
       <StatusScreen
         snapshot={null}
         title="Verbinde"
-        detail="Backend-Verbindung wird hergestellt …"
+        detail="Verbindung wird hergestellt …"
       />
     );
   }
@@ -223,7 +235,7 @@ function CheckStation() {
       <StatusScreen
         snapshot={snapshot}
         title="Nicht verbunden"
-        detail="Die Anzeige wartet auf das lokale ARGUS-Backend. Es wird automatisch erneut verbunden."
+        detail="Warte auf Backend-Verbindung …"
         status="err"
       />
     );
@@ -258,7 +270,7 @@ function CheckStation() {
       <StatusScreen
         snapshot={snapshot}
         title="Bereit"
-        detail="Ein Kleidungsstück in die leere Box legen."
+        detail="Kleidungsstück einlegen"
       />
     );
   }
@@ -268,7 +280,7 @@ function CheckStation() {
       <StatusScreen
         snapshot={snapshot}
         title="Messung läuft"
-        detail="Gewicht und RFID werden stabil erfasst …"
+        detail="Bitte nicht berühren …"
       />
     );
   }
@@ -367,8 +379,8 @@ function CheckStation() {
         title="Erfasst"
         detail={
           nothingFound
-            ? "Keine Gegenstände erfasst. Kleidungsstück entnehmen."
-            : "Fund erfasst. Kleidungsstück entnehmen und Fund sicherstellen."
+            ? "Keine Gegenstände. Bitte entnehmen."
+            : "Fund erfasst. Bitte entnehmen."
         }
         status={nothingFound ? "ok" : "err"}
       />
@@ -431,10 +443,10 @@ function CheckStation() {
           <div className="mb-8 text-center">
             <GarmentHeading garment={garment} />
             <h1 className="mt-2 font-display text-6xl font-bold uppercase tracking-tight">
-              Gefunden
+              Was wurde gefunden?
             </h1>
             <p className="mt-2 font-mono text-sm uppercase tracking-[0.2em] text-steel">
-              Gegenstand antippen
+              Antippen zum Erfassen
             </p>
           </div>
           <div className="mx-auto grid w-full max-w-4xl grid-cols-3 gap-5">
@@ -445,8 +457,12 @@ function CheckStation() {
                 onClick={() => void submitFeedback(item.category)}
                 className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-2xl bg-paper ring-2 ring-black/10 transition-all active:scale-[0.97] active:ring-err disabled:opacity-50"
               >
-                <span className="grid size-20 place-items-center rounded-xl bg-panel text-4xl ring-1 ring-black/5">
-                  {item.icon}
+                <span className="grid size-20 place-items-center rounded-xl bg-panel ring-1 ring-black/5">
+                  <item.Icon
+                    className="size-10"
+                    strokeWidth={1.5}
+                    aria-hidden
+                  />
                 </span>
                 <span className="font-body text-xl font-semibold">
                   {item.label}
@@ -486,7 +502,7 @@ function CheckStation() {
         onClick={() => setScreen("check")}
         className="grid flex-1 grid-cols-1 gap-px bg-line text-left md:grid-cols-2"
       >
-        <div className="flex flex-col items-center justify-center bg-panel p-8">
+        <div className="flex flex-col items-center justify-center bg-ok/5 p-8">
           <p className="font-mono text-sm uppercase tracking-[0.3em] text-steel">
             Schacht
           </p>
@@ -518,7 +534,7 @@ function CheckStation() {
             ))}
           </div>
         </div>
-        <div className="flex flex-col justify-center bg-panel p-12">
+        <div className="flex flex-col justify-center bg-ok/5 p-12">
           <p className="font-display text-5xl font-bold uppercase tracking-tight">
             {garment.product_name}
           </p>
