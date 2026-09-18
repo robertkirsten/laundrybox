@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ENV_FILE=/etc/argus/argus.env
 BACKEND=/opt/argus/venv/bin/argus-backend
 DATABASE=/var/lib/argus/argus.sqlite3
+BACKUP_DIR=/var/lib/argus/backups
 LEGACY_FRONTEND_UNIT=smart-shaft.service
 
 if [[ ! -f "$ENV_FILE" && -f /etc/argus/backend.env ]]; then
@@ -79,6 +80,83 @@ led_test() {
     return "$result"
 }
 
+db_refresh() {
+    require_install
+    local assume_yes=0 arg
+    for arg in "$@"; do
+        case "$arg" in
+            -y|--yes) assume_yes=1 ;;
+            *) echo "unknown option for db-refresh: $arg" >&2; exit 2 ;;
+        esac
+    done
+
+    if [[ "$assume_yes" -ne 1 ]]; then
+        cat >&2 <<EOF
+This PERMANENTLY DELETES the production database at
+  $DATABASE
+and rebuilds an empty schema seeded with mock data only. All real scan
+history and registered garments are lost. A verified backup is written to
+$BACKUP_DIR first.
+EOF
+        read -r -p "Type 'refresh' to continue: " reply
+        [[ "$reply" == "refresh" ]] || { echo "Aborted." >&2; exit 1; }
+    fi
+
+    if as_argus test -f "$DATABASE"; then
+        echo "==> Backing up current database"
+        if ! as_argus "$BACKEND" --env-file "$ENV_FILE" backup "$BACKUP_DIR" --keep 14; then
+            echo "Backup failed; refusing to delete the database." >&2
+            exit 1
+        fi
+    else
+        echo "==> No existing database found; skipping backup"
+    fi
+
+    # Only the backend holds the SQLite file open; the frontend just calls the
+    # API and recovers on its own, so we leave it running.
+    echo "==> Stopping backend to release the database"
+    as_root systemctl stop argus-backend.service
+
+    echo "==> Removing database and WAL sidecar files"
+    as_root rm -f "$DATABASE" "$DATABASE-wal" "$DATABASE-shm"
+
+    # Starting the backend runs 'alembic upgrade head' (ExecStartPre) against the
+    # empty file, then the app seeds mock data during lifespan startup because
+    # ARGUS_SEED_MOCK_DATA=true. Uvicorn only accepts requests once lifespan
+    # startup (seeding) has finished, so a successful health call confirms it.
+    echo "==> Starting backend (alembic rebuilds the schema; the app reseeds mock data)"
+    if ! as_root systemctl start argus-backend.service; then
+        echo "Backend failed to start; the pre-refresh backup is in $BACKUP_DIR." >&2
+        echo "Inspect with 'argusctl logs'." >&2
+        exit 1
+    fi
+
+    echo "==> Waiting for the backend to come up"
+    local ready=0
+    for _ in $(seq 1 30); do
+        if curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 1
+    done
+    if [[ "$ready" -ne 1 ]]; then
+        echo "Backend did not come up within 30s; the backup is in $BACKUP_DIR." >&2
+        echo "Inspect with 'argusctl logs'." >&2
+        exit 1
+    fi
+
+    # Seeding creates reference data (garments etc.), not scan history, so verify
+    # by counting garments rather than scans.
+    local garments="?"
+    if command -v sqlite3 >/dev/null 2>&1; then
+        garments=$(as_argus sqlite3 -readonly "$DATABASE" \
+            "SELECT count(*) FROM garments;" 2>/dev/null || echo "?")
+    fi
+    echo "==> Refreshed. Seeded garments: $garments (the scan log starts empty)."
+    curl -fsS http://127.0.0.1:8000/api/v1/health | python3 -m json.tool || true
+}
+
 usage() {
     cat <<'EOF'
 Usage: argusctl COMMAND [OPTIONS]
@@ -93,6 +171,7 @@ Commands:
   serial [options]    Safely stop backend, show raw serial, then restore it
   led-test [options]  Safely stop backend and fill the LED strip
   db                  Open the production SQLite database read-only
+  db-refresh [--yes]  Back up, wipe, and reseed the production database
   backup              Run a verified database backup now
 
 Examples:
@@ -100,6 +179,7 @@ Examples:
   argusctl scans --last 50 --csv
   argusctl serial --seconds 15
   argusctl led-test
+  argusctl db-refresh
 EOF
 }
 
@@ -148,6 +228,10 @@ case "${1:-help}" in
         else
             exec sudo -u argus sqlite3 -readonly -header -column "$DATABASE"
         fi
+        ;;
+    db-refresh|db_refresh)
+        shift
+        db_refresh "$@"
         ;;
     backup)
         as_root systemctl start argus-backup.service
